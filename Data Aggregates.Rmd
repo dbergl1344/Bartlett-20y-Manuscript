@@ -1,0 +1,198 @@
+---
+title: "Data Aggregates"
+output: html_document
+date: "2025-12-30"
+---
+
+# Interpolate missing SWC data.
+```{r}
+library(dplyr)
+library(zoo)  # For gap filling
+
+# Define function for gap filling using linear interpolation
+gap_fill_linear <- function(x) {
+  na.approx(x, na.rm = FALSE)  # Linear interpolation
+}
+
+# Apply gap filling to SWC columns and create new columns
+swc_columns <- c("SWC_1_1_1", "SWC_2_1_1", "SWC_3_1_1", "SWC_4_1_1")
+
+# Create new column names for the gap-filled versions
+new_swc_columns <- paste0(swc_columns, "_filled")
+
+# Gap-fill the SWC columns and assign to new columns using linear interpolation
+NewBart.df[new_swc_columns] <- lapply(NewBart.df[swc_columns], gap_fill_linear)
+
+# Check the range of the new SWC values after gap filling
+after_range <- sapply(NewBart.df[new_swc_columns], function(x) c(min(x, na.rm = TRUE), max(x, na.rm = TRUE)))
+
+# Print the range of SWC values after gap filling
+print("Range of SWC values after gap filling:")
+print(after_range)
+
+# Create the average SWC after interpolation from the new filled columns
+NewBart.df$SWC_AverageNew <- rowMeans(NewBart.df[new_swc_columns], na.rm = TRUE)
+
+# Check if there are any NAs in the new SWC_Average
+
+print(sum(is.na(NewBart.df$SWC_AverageNew)))
+```
+
+
+
+# Daily data aggregation
+```{r}
+# Load necessary libraries
+library(dplyr)
+library(lubridate) # For date manipulation, if needed to convert things into POSIX
+
+# Define correction factors
+MolarMass <- 12.01
+SecondsPerHalfHour <- 1800
+SecondsPerDay <- 3600 * 24
+SecondsPerWeek <- SecondsPerDay * 7
+SecondsPerMonth <- SecondsPerDay * 30.4375  # Approximate value for an average month
+SecondsPerYear <- SecondsPerDay * 365.25
+
+# Calculate daily averages and apply correction
+daily_avg <- NewBart.df %>%
+  mutate(Date = as.Date(DateTime)) %>%
+  group_by(Date) %>%
+  summarise(
+    across(c("Tair", "TS_F_1_2_1", "PPFD", "Rh", "WS_1_1_1", "SWC_1_1_1", "SWC_2_1_1", "SWC_3_1_1", "SWC_4_1_1", "VPD", "Rg", "NEE","SWC_AverageNew", "EVI", "DOY_cos", "DOY_sin", "Hour_cos", "Hour_sin", "PPFD_DIF_1_1_1", "PPFD_DIR_1_1_1", "PPFD_dir_f", "PPFD_diff_f"), mean, na.rm = TRUE),
+    PPFD_cumtotal = sum(PPFD, na.rm = TRUE) * SecondsPerHalfHour,
+    PPFD_DIF_cumtotal = sum(PPFD_DIF_1_1_1, na.rm = TRUE) * SecondsPerHalfHour,
+    PPFD_DIR_cumtotal = sum(PPFD_DIR_1_1_1, na.rm = TRUE) * SecondsPerHalfHour,
+    PPFD_DIF_cumtotal_f = sum(PPFD_dir_f, na.rm = TRUE) * SecondsPerHalfHour,
+    PPFD_DIR_cumtotal_f = sum(PPFD_dir_f, na.rm = TRUE) * SecondsPerHalfHour,
+    GPP_mean = mean(GPPU50, na.rm = TRUE) * 1e-6 * MolarMass * SecondsPerDay,
+    Reco_mean = mean(RecoU50, na.rm = TRUE) * 1e-6 * MolarMass * SecondsPerDay,
+    NEE_mean = mean(NEEU50_f, na.rm = TRUE) * 1e-6 * MolarMass * SecondsPerDay, 
+    CO2_mean = mean(CO2_1_1_1, na.rm = TRUE), 
+    P_1_1_1 = sum(P_1_1_1, na.rm = TRUE)
+  )
+
+# Ensure the data is sorted properly before calculating lags
+daily_avg <- daily_avg %>%
+  arrange(Date)
+
+# Define lagged variables with correct lag lengths (assuming daily data)
+daily_avg <- daily_avg %>%
+  mutate(
+    # Lagged variables for 1 month (30 days)
+    lagged_SWC_1m = lag(SWC_AverageNew, 30),
+    lagged_Tair_1m = lag(Tair, 30),
+    lagged_SoilTemp_1m = lag(TS_F_1_2_1, 30),
+
+    # Lagged variables for 2 months (60 days)
+    lagged_SWC_2m = lag(SWC_AverageNew, 60),
+    lagged_Tair_2m = lag(Tair, 60),
+    lagged_SoilTemp_2m = lag(TS_F_1_2_1, 60)
+  )
+
+# Calculate min and max values for key variables (daily data)
+daily_avg <- daily_avg %>%
+  group_by(Date) %>%
+  mutate(
+    Tmin_TS = min(TS_F_1_2_1, na.rm = TRUE),
+    Tmax_TS = max(TS_F_1_2_1, na.rm = TRUE),
+    Tmin_Tair = min(Tair, na.rm = TRUE),
+    Tmax_Tair = max(Tair, na.rm = TRUE),
+    max_VPD = max(VPD, na.rm = TRUE)
+  ) %>%
+  ungroup()
+
+```
+
+# Weekly aggregate
+```{r}
+library(lubridate)
+# Calculate weekly averages
+weekly_avg <- NewBart.df %>%
+  mutate(Week = week(DateTime), Year = year(DateTime)) %>%
+  group_by(Year, Week) %>%
+  summarise(
+     across(c("Tair", "TS_F_1_2_1", "PPFD", "Rh", "WS_1_1_1", "SWC_1_1_1", "SWC_2_1_1", "SWC_3_1_1", "SWC_4_1_1", "VPD", "Rg", "NEE", "SWC_AverageNew", "EVI", "DOY_cos", "DOY_sin", "Hour_cos", "Hour_sin", "PPFD_DIF_1_1_1", "PPFD_DIR_1_1_1", "PPFD_dir_f", "PPFD_diff_f"), mean, na.rm = TRUE),
+    PPFD_cumtotal = sum(PPFD, na.rm = TRUE) * SecondsPerHalfHour,
+    PPFD_DIF_cumtotal = sum(PPFD_DIF_1_1_1, na.rm = TRUE) * SecondsPerHalfHour,
+    PPFD_DIR_cumtotal = sum(PPFD_DIR_1_1_1, na.rm = TRUE) * SecondsPerHalfHour,
+    PPFD_DIF_cumtotal_f = sum(PPFD_dir_f, na.rm = TRUE) * SecondsPerHalfHour,
+    PPFD_DIR_cumtotal_f = sum(PPFD_dir_f, na.rm = TRUE) * SecondsPerHalfHour,
+    GPP_mean = mean(GPPU50, na.rm = TRUE) * 1e-6 * MolarMass * SecondsPerWeek,
+    Reco_mean = mean(RecoU50, na.rm = TRUE) * 1e-6 * MolarMass * SecondsPerWeek,
+    NEE_mean = mean(NEEU50_f, na.rm = TRUE) * 1e-6 * MolarMass * SecondsPerWeek, 
+    CO2_mean = mean(CO2_1_1_1, na.rm = TRUE),
+    P_1_1_1 = sum(P_1_1_1, na.rm = TRUE)
+  )
+```
+
+
+# Monthly aggregate
+
+```{r}
+library(ggplot2)
+monthly_avg <- NewBart.df %>%
+  mutate(Month = month(DateTime), Year = year(DateTime)) %>%
+  group_by(Year, Month) %>%
+  summarise(
+    across(c("Tair", "TS_F_1_2_1", "PPFD", "Rh", "WS_1_1_1", "SWC_1_1_1", "SWC_2_1_1", "SWC_3_1_1", "SWC_4_1_1", "VPD", "Rg", "NEE", "SWC_AverageNew", "EVI", "DOY_cos", "DOY_sin", "Hour_cos", "Hour_sin", "PPFD_DIF_1_1_1", "PPFD_DIR_1_1_1", "PPFD_dir_f", "PPFD_diff_f"), mean, na.rm = TRUE),
+    PPFD_cumtotal = sum(PPFD, na.rm = TRUE) * SecondsPerHalfHour,
+    PPFD_DIF_cumtotal = sum(PPFD_DIF_1_1_1, na.rm = TRUE) * SecondsPerHalfHour,
+    PPFD_DIR_cumtotal = sum(PPFD_DIR_1_1_1, na.rm = TRUE) * SecondsPerHalfHour,
+    PPFD_DIF_cumtotal_f = sum(PPFD_dir_f, na.rm = TRUE) * SecondsPerHalfHour,
+    PPFD_DIR_cumtotal_f = sum(PPFD_dir_f, na.rm = TRUE) * SecondsPerHalfHour,
+    GPP_mean = mean(GPPU50, na.rm = TRUE) * 1e-6 * MolarMass * SecondsPerMonth,
+    Reco_mean = mean(RecoU50, na.rm = TRUE) * 1e-6 * MolarMass * SecondsPerMonth,
+    NEE_mean = mean(NEEU50_f, na.rm = TRUE) * 1e-6 * MolarMass * SecondsPerMonth, 
+    CO2_mean = mean(CO2_1_1_1, na.rm = TRUE), 
+    P_1_1_1 = sum(P_1_1_1, na.rm = TRUE)
+  )
+```
+
+
+# Yearly aggregate
+```{r}
+# Calculate annual averages
+annual_avg_final <- NewBart.df %>%
+  mutate(Year = year(DateTime)) %>%
+  group_by(Year) %>%
+  summarise(
+     across(c("Tair", "TS_F_1_2_1", "PPFD", "Rh", "WS_1_1_1", "SWC_1_1_1", "SWC_2_1_1", "SWC_3_1_1", "SWC_4_1_1", "VPD", "Rg", "NEE", "PPFD_DIF_1_1_1", "PPFD_DIR_1_1_1", "PPFD_dir_f", "PPFD_diff_f", "SWC_AverageNew", "EVI", "DOY_cos", "DOY_sin", "Hour_cos", "Hour_sin"), mean, na.rm = TRUE),
+    PPFD_cumtotal = sum(PPFD, na.rm = TRUE) * SecondsPerHalfHour,
+    PPFD_DIF_cumtotal = sum(PPFD_DIF_1_1_1, na.rm = TRUE) * SecondsPerHalfHour,
+    PPFD_DIR_cumtotal = sum(PPFD_DIR_1_1_1, na.rm = TRUE) * SecondsPerHalfHour,
+    PPFD_DIF_cumtotal_f = sum(PPFD_diff_f, na.rm = TRUE) * SecondsPerHalfHour,
+    PPFD_DIR_cumtotal_f = sum(PPFD_dir_f, na.rm = TRUE) * SecondsPerHalfHour,
+    GPP_mean = mean(GPPU50, na.rm = TRUE) * 1e-6 * MolarMass * SecondsPerYear,
+    Reco_mean = mean(RecoU50, na.rm = TRUE) * 1e-6 * MolarMass * SecondsPerYear,
+    NEE_mean = mean(NEEU50_f, na.rm = TRUE) * 1e-6 * MolarMass * SecondsPerYear, 
+    CO2_mean = mean(CO2_1_1_1, na.rm = TRUE),
+    P_1_1_1 = sum(P_1_1_1, na.rm = TRUE)
+  )
+```
+
+
+
+
+# Annual Averages with the different friction velocities
+```{r}
+# Calculate annual averages
+annual_avg_finalUstars <- NewBart.df %>%
+  mutate(Year = year(DateTime)) %>%
+  group_by(Year) %>%
+  summarise(
+     across(c("Tair", "TS_F_1_2_1", "PPFD", "Rh", "WS_1_1_1", "SWC_1_1_1", "SWC_2_1_1", "SWC_3_1_1", "SWC_4_1_1", "VPD", "Rg", "NEE", "PPFD_DIF_1_1_1", "PPFD_DIR_1_1_1", "PPFD_dir_f", "PPFD_diff_f", "SWC_AverageNew", "EVI", "DOY_cos", "DOY_sin", "Hour_cos", "Hour_sin"), mean, na.rm = TRUE),
+    GPP_mean = mean(GPPU50, na.rm = TRUE) * 1e-6 * MolarMass * SecondsPerYear,
+    Reco_mean = mean(RecoU50, na.rm = TRUE) * 1e-6 * MolarMass * SecondsPerYear,
+    NEE_mean = mean(NEEU50_f, na.rm = TRUE) * 1e-6 * MolarMass * SecondsPerYear, 
+    GPP_meanU05 = mean(GPPU05, na.rm = TRUE) * 1e-6 * MolarMass * SecondsPerYear,
+    Reco_meanU05 = mean(RecoU05, na.rm = TRUE) * 1e-6 * MolarMass * SecondsPerYear,
+    NEE_meanU05 = mean(NEEU05_f, na.rm = TRUE) * 1e-6 * MolarMass * SecondsPerYear,
+    GPP_meanU95 = mean(GPPU95, na.rm = TRUE) * 1e-6 * MolarMass * SecondsPerYear,
+    Reco_meanU95 = mean(RecoU95, na.rm = TRUE) * 1e-6 * MolarMass * SecondsPerYear,
+    NEE_meanU95 = mean(NEEU95_f, na.rm = TRUE) * 1e-6 * MolarMass * SecondsPerYear,
+    CO2_mean = mean(CO2_1_1_1, na.rm = TRUE),
+    P_1_1_1 = sum(P_1_1_1, na.rm = TRUE)
+  )
+```
+
