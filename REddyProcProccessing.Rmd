@@ -1,0 +1,191 @@
+---
+title: "REddyProc Proccessing"
+output: html_document
+date: "2026-01-02"
+---
+
+# Load the necessary libraries 
+```{r}
+library(tidyverse)
+library(dplyr)
+library(amerifluxr)
+library(devtools)
+library(REddyProc)
+library(bigleaf)
+```
+
+
+
+# Make a new dataset to work with for REddyProc to keep the original one unaltered and keep the years only 2024_2023
+```{r}
+REddy2004_2023 <- as.data.frame(Bart04_23AmeriFlux)
+# Filter the dataframe to include only rows where Year is between 2004 and 2023
+REddy2004_2023 <- REddy2004_2023[REddy2004_2023$Year >= 2004 & REddy2004_2023$Year <= 2023, ]
+
+colnames(REddy2004_2023)
+```
+
+#Calculating the VPD from RH and Tair
+```{r}
+REddy2004_2023 <- cbind(REddy2004_2023, VPD = fCalcVPDfromRHandTair(REddy2004_2023$RH_F_1_1_1, REddy2004_2023$TA_F_1_1_1))
+head(REddy2004_2023$VPD)
+```
+
+
+# Adding other neccessary columns here for REddyProc 
+```{r}
+REddy2004_2023$Rg <- PPFD.to.Rg(REddy2004_2023$PPFD_IN_F_1_1_1)
+range(REddy2004_2023$Rg) # This range looks correct
+REddy2004_2023$Tair <- REddy2004_2023$TA_F_1_1_1
+REddy2004_2023$Ustar <- REddy2004_2023$USTAR_1_1_1
+```
+
+
+
+# now converting things to POSIX 
+```{r}
+# Make sure that all of these are in a numeric format
+REddy2004_2023$Year   <- as.numeric(REddy2004_2023$Year)
+REddy2004_2023$Month  <- as.numeric(REddy2004_2023$Month)
+REddy2004_2023$Day    <- as.numeric(REddy2004_2023$Day)
+REddy2004_2023$Hour   <- as.numeric(REddy2004_2023$Hour)
+REddy2004_2023$Minute <- as.numeric(REddy2004_2023$Minute)
+
+Bartlett.Posix.04_23 <- fConvertTimeToPosix(REddy2004_2023, 
+                                           TFormat = 'YMDHM', 
+                                           Year = 'Year', 
+                                           Month = 'Month', 
+                                           Day = 'Day', 
+                                           Hour = 'Hour', 
+                                           Min = 'Minute')
+```
+
+# Now making your SEddyProc class for ReddyProc and setting the location information
+```{r}
+Bart.BRT <- sEddyProc$new('US-Bar', Bartlett.Posix.04_23, c('NEE','Rg','Tair','VPD', 'Ustar'))
+Bart.BRT$`.->sDATA`$sDateTime # REddyProc DateTime column that is created ends up being in the 15, 45 stamps, but when you export it, it is correct per what Thomas Wultzer said in his email.
+
+# Set location information
+Bart.BRT$sSetLocationInfo(LatDeg = 44.0646, LongDeg = -71.2881, TimeZoneHour = -5) 
+```
+
+
+
+# Here is the code for computing IQR:
+```{r}
+Bart.BRT$sMDSGapFill('NEE')
+summary(Bart.BRT$sTEMP$NEE_orig)
+summary(Bart.BRT$sTEMP$NEE_fall)
+
+### Check for outliers using IQR of residuals (>6*IQR is outlier)
+residual=Bart.BRT$sTEMP$NEE_orig-Bart.BRT$sTEMP$NEE_fall
+IQR=IQR(residual,na.rm=TRUE)
+outlier=ifelse(abs(residual)>(IQR*6),1,0)
+NEE_filt=ifelse(outlier==0,Bart.BRT$sTEMP$NEE_orig,NA)
+print(IQR)
+summary(residual)
+summary(outlier)
+### Plot outliers
+EddieC=data.frame(Bart.BRT$sTEMP$sDateTime,Bart.BRT$sTEMP$NEE_orig,Bart.BRT$sDATA$Ustar,Bart.BRT$sTEMP$NEE_fall,residual,outlier,NEE_filt)
+colnames(EddieC)=c('sDateTime','NEE_orig','Ustar','NEE_fall','residual','outlier','NEE_filt')
+### Number and Percentage of outliers
+sum(as.numeric(EddieC$outlier),na.rm=TRUE)
+sum(as.numeric(EddieC$outlier),na.rm=TRUE)/length(EddieC$outlier)
+
+EddieC$year=substr(EddieC[,1],1,4)
+EddieC$doy=strftime(EddieC[,1], format = "%j")
+ggplot(EddieC,aes(y=NEE_orig,x=as.numeric(doy),color=as.factor(outlier)))+
+  geom_point(shape=21,alpha=0.4)+
+  theme_minimal()+
+  labs(x='Day of year',y='NEE')+
+  scale_color_manual(values=c('skyblue','navy'))+
+  facet_wrap(~year)
+summary(EddieC)
+
+ggplot(EddieC,aes(y=abs(residual),x=Ustar,color=outlier))+
+  geom_point()
+
+### Re-run the outlier test after initial filtering
+EddieC$residual2=EddieC$NEE_filt-EddieC$NEE_fall
+EddieC$IQR2=IQR(EddieC$residual2,na.rm=TRUE)
+EddieC$outlier2=ifelse(abs(EddieC$residual2)>EddieC$IQR2*6,1,0)
+### Number and Percentage of outliers
+sum(as.numeric(EddieC$outlier2),na.rm=TRUE)
+sum(as.numeric(EddieC$outlier2),na.rm=TRUE)/length(EddieC$outlier2)
+
+EddieC$NEE_filt2=ifelse(EddieC$outlier2==0,EddieC$NEE_filt,NA)
+ggplot(EddieC,aes(y=abs(residual2),x=Ustar,color=outlier2))+
+  geom_point()
+
+### Remove outliers
+Bart.BRT$sDATA$NEE=EddieC$NEE_filt2
+```
+
+
+# Continuing with REddyProc Processing
+
+```{r}
+Bart.BRT$sMDSGapFill("Tair", FillAll =FALSE)
+Bart.BRT$sMDSGapFill("VPD", FillAll =FALSE)
+Bart.BRT$sMDSGapFill("Rg", FillAll =FALSE)
+
+set.seed(123456)
+Bart.BRT$sEstimateUstarScenarios(nSample = 700L, probs = c(0.05, 0.5, 0.95))
+
+##Not chaning my uStarTh for this, as I want the same uStar as my last run
+uStarTh <- Bart.BRT$sGetEstimatedUstarThresholdDistribution()
+uStar <- uStarTh  %>%
+     filter( aggregationMode == "single") %>%
+     select( "uStar", "5%", "50%", "95%")
+
+uStarDf <- cbind(season=na.omit(unique(uStarTh$season)), uStar )
+Bart.BRT$sSetUstarScenarios(uStarDf)
+Bart.BRT$sGetUstarScenarios()
+
+Bart.BRT$sMDSGapFillUStarScens('NEE')
+```
+
+# Now examining the Ustar filtering and adding it to the dataframe for BRT gap-filling
+```{r}
+REddy2004_2023$NEEIQR_orig <- Bart.BRT$`.->sDATA`$NEE
+
+colnames(REddy2004_2023)
+#check to make sure everything here passes the sniff check
+print(sum(is.na(REddy2004_2023$NEE)))
+print(sum(is.na(REddy2004_2023$NEEIQR_orig)))
+
+# Just to make sure I am doing this instead
+REddy2004_2023 <- REddy2004_2023 %>%
+  mutate(
+    NEEU05_orig = ifelse(Ustar >= 0.292441, NEEIQR_orig, NA),
+    NEEU50_orig = ifelse(Ustar >= 0.3557708, NEEIQR_orig, NA),
+    NEEU95_orig = ifelse(Ustar >= 0.4193314, NEEIQR_orig, NA)
+  )
+
+
+print(sum(is.na(REddy2004_2023$NEE)))
+print(sum(is.na(REddy2004_2023$NEEIQR_orig)))
+print(sum(is.na(REddy2004_2023$NEEU05_orig)))
+print(sum(is.na(REddy2004_2023$NEEU50_orig)))
+print(sum(is.na(REddy2004_2023$NEEU95_orig)))
+
+write.csv(U05Input04_23, file = "~/Desktop/Python_XGB/NEE_U50_Python/AmeriFlux/U05Input04_23.csv")
+write.csv(U50Input04_23, file = "~/Desktop/Python_XGB/NEE_U50_Python/AmeriFlux/U50Input04_23.csv")
+write.csv(U95Input04_23, file = "~/Desktop/Python_XGB/NEE_U50_Python/AmeriFlux/U95Input04_23.csv")
+
+
+#XGB final model parameters: 
+# Start to run the optimizer ...
+# XGBoost_regression took 464.40 seconds,  candidates checked: 40, best CV score: -2.098 ± 0.026
+# Best parameters:
+# OrderedDict([('colsample_bytree', 0.7538607571502197), ('learning_rate', 0.035310272828400296), ('max_depth', 6), ('n_estimators', 714), ('reg_alpha', 5.243049953323151), ('reg_lambda', 9.948506725979197), ('subsample', 0.7446697286156256)])
+# Running: best_params=OrderedDict([('colsample_bytree', 0.7538607571502197), ('learning_rate', 0.035310272828400296), ('max_depth', 6), ('n_estimators', 714), ('reg_alpha', 5.243049953323151), ('reg_lambda', 9.948506725979197), ('subsample', 0.7446697286156256)])
+# Data has been written to /Users/DarbyBergl/Desktop/Python_XGB/NEE_U50_Python/AmeriFlux/XGB_models/model_best_paramsDec18.csv
+# Model pkl files saved to /Users/DarbyBergl/Desktop/Python_XGB/NEE_U50_Python/AmeriFlux/XGB_models/model04_23Dec18.pkl.
+```
+
+
+
+
+
+
