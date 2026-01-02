@@ -1,0 +1,116 @@
+---
+title: "Meterological Trends"
+output: html_document
+date: "2026-01-02"
+---
+
+```{r}
+
+library(dplyr)
+library(knitr)
+library(broom)
+
+# Using annual_avg_final` dataset
+
+variables <- c("SWC_AverageNew", "P_1_1_1", "Tair", "TS_F_1_2_1", 
+               "VPD", "CO2_mean", "PPFD_DIF_cumtotal_f", "PPFD_DIR_cumtotal_f")
+
+# Function to calculate slope and p-value
+calculate_trend <- function(data, variable) {
+  if (variable %in% names(data)) {
+    # Perform linear regression: variable ~ Year
+    model <- lm(as.formula(paste(variable, "~ Year")), data = data)
+    # Extract slope and p-value from the model
+    summary <- tidy(model)
+    slope <- summary$estimate[2] # Second row corresponds to the slope (Year coefficient)
+    p_value <- summary$p.value[2] # Second row corresponds to the p-value for slope
+    return(c(slope = slope, p_value = p_value))
+  } else {
+    return(c(slope = NA, p_value = NA))
+  }
+}
+
+# Calculating Trends
+trend_results <- t(sapply(variables, calculate_trend, data = annual_avg_final))
+trend_results <- as.data.frame(trend_results)
+trend_results$Variable <- variables
+
+# Rename columns for clarity
+colnames(trend_results) <- c("Slope_Year", "P_value", "Variable")
+
+# Merge trend results with summary statistics
+summary_stats <- annual_avg_final %>%
+  summarise(
+    SWC_Mean = mean(SWC_AverageNew, na.rm = TRUE),
+    SWC_Min = min(SWC_AverageNew, na.rm = TRUE),
+    SWC_Max = max(SWC_AverageNew, na.rm = TRUE),
+    SWC_SD = sd(SWC_AverageNew, na.rm = TRUE),
+    
+    Precip_Mean = mean(P_1_1_1, na.rm = TRUE),
+    Precip_Min = min(P_1_1_1, na.rm = TRUE),
+    Precip_Max = max(P_1_1_1, na.rm = TRUE),
+    Precip_SD = sd(P_1_1_1, na.rm = TRUE),
+    
+    Tair_Mean = mean(Tair, na.rm = TRUE),
+    Tair_Min = min(Tair, na.rm = TRUE),
+    Tair_Max = max(Tair, na.rm = TRUE),
+    Tair_SD = sd(Tair, na.rm = TRUE),
+    
+    TS_Mean = mean(TS_F_1_2_1, na.rm = TRUE),
+    TS_Min = min(TS_F_1_2_1, na.rm = TRUE),
+    TS_Max = max(TS_F_1_2_1, na.rm = TRUE),
+    TS_SD = sd(TS_F_1_2_1, na.rm = TRUE),
+    
+    VPD_Mean = mean(VPD, na.rm = TRUE),
+    VPD_Min = min(VPD, na.rm = TRUE),
+    VPD_Max = max(VPD, na.rm = TRUE),
+    VPD_SD = sd(VPD, na.rm = TRUE),
+    
+    CO2_Mean = mean(CO2_mean, na.rm = TRUE),
+    CO2_Min = min(CO2_mean, na.rm = TRUE),
+    CO2_Max = max(CO2_mean, na.rm = TRUE),
+    CO2_SD = sd(CO2_mean, na.rm = TRUE),
+    
+    PPFD_diff_Mean = mean(PPFD_DIF_cumtotal_f, na.rm = TRUE),
+    PPFD_diff_Min = min(PPFD_DIF_cumtotal_f, na.rm = TRUE),
+    PPFD_diff_Max = max(PPFD_DIF_cumtotal_f, na.rm = TRUE),
+    PPFD_diff_SD = sd(PPFD_DIF_cumtotal_f, na.rm = TRUE), 
+    
+    PPFD_dir_Mean = mean(PPFD_DIR_cumtotal_f, na.rm = TRUE),
+    PPFD_dir_Min = min(PPFD_DIR_cumtotal_f, na.rm = TRUE),
+    PPFD_dir_Max = max(PPFD_DIR_cumtotal_f, na.rm = TRUE),
+    PPFD_dir_SD = sd(PPFD_DIR_cumtotal_f, na.rm = TRUE)
+  )
+
+# summary statistics and trend results
+final_summary_table <- data.frame(
+  Variable = trend_results$Variable,
+  
+  Mean = c(summary_stats$SWC_Mean, summary_stats$Precip_Mean, 
+           summary_stats$Tair_Mean, summary_stats$TS_Mean, 
+           summary_stats$VPD_Mean, summary_stats$CO2_Mean, 
+           summary_stats$PPFD_diff_Mean, summary_stats$PPFD_dir_Mean),
+  
+  Min = c(summary_stats$SWC_Min, summary_stats$Precip_Min, 
+          summary_stats$Tair_Min, summary_stats$TS_Min, 
+          summary_stats$VPD_Min, summary_stats$CO2_Min, 
+          summary_stats$PPFD_diff_Min, summary_stats$PPFD_dir_Min),
+  
+  Max = c(summary_stats$SWC_Max, summary_stats$Precip_Max, 
+          summary_stats$Tair_Max, summary_stats$TS_Max, 
+          summary_stats$VPD_Max, summary_stats$CO2_Max, 
+          summary_stats$PPFD_diff_Max, summary_stats$PPFD_dir_Max),
+  
+  SD = c(summary_stats$SWC_SD, summary_stats$Precip_SD, 
+         summary_stats$Tair_SD, summary_stats$TS_SD, 
+         summary_stats$VPD_SD, summary_stats$CO2_SD, 
+         summary_stats$PPFD_diff_SD, summary_stats$PPFD_dir_SD),
+  
+  Slope_Year = trend_results$Slope_Year,
+  P_value = trend_results$P_value
+)
+
+kable(final_summary_table, format = "pipe", digits = 4, align = 'c', 
+      caption = "Summary of Meteorological Variables with Variability and Trends")
+
+
