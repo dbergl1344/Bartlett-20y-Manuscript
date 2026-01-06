@@ -1,0 +1,279 @@
+---
+title: "GPP-derived Phenology"
+output: html_document
+date: "2025-12-30"
+---
+
+Starting with PhenoCam Data first and downloading site data for Bartlett
+```{r}
+library(phenocamr)
+library(lubridate)
+library(Kendall)
+
+# downloading data
+download_phenocam(
+  site = "bartlettir",
+  veg_type = "DB",
+  roi_id = "2000",
+  frequency = 3,
+  outlier_detection = FALSE,
+  smooth = FALSE,
+  out_dir = tempdir()
+)
+
+BartlettIR2000df <- read_phenocam(
+  file.path(tempdir(), "bartlettir_DB_2000_3day.csv")
+)
+
+download_phenocam(
+  site = "bartlettir",
+  veg_type = "DB",
+  roi_id = "1000",
+  frequency = 3,
+  outlier_detection = FALSE,
+  smooth = FALSE,
+  out_dir = tempdir()
+)
+
+BartlettIR1000df <- read_phenocam(
+  file.path(tempdir(), "bartlettir_DB_1000_3day.csv")
+)
+
+# detecting outliers and smoothing
+
+BartlettIR1000df <- expand_phenocam(BartlettIR1000df)
+BartlettIR2000df <- expand_phenocam(BartlettIR2000df)
+
+BartlettIR1000df <- detect_outliers(BartlettIR1000df)
+BartlettIR2000df <- detect_outliers(BartlettIR2000df)
+
+BartlettIR1000df <- smooth_ts(BartlettIR1000df)
+BartlettIR2000df <- smooth_ts(BartlettIR2000df)
+
+
+# extracting phenology dates
+phenology_dates1000 <- phenophases(BartlettIR1000df, internal = TRUE)
+
+# baseline correction
+BartlettIR2000df$data$smooth_gcc_mean <- BartlettIR2000df$data$smooth_gcc_mean + 0.02
+BartlettIR2000df$data$smooth_gcc_90   <- BartlettIR2000df$data$smooth_gcc_90   + 0.02
+BartlettIR2000df$data$smooth_gcc_75   <- BartlettIR2000df$data$smooth_gcc_75   + 0.02
+BartlettIR2000df$data$smooth_gcc_50   <- BartlettIR2000df$data$smooth_gcc_50   + 0.02
+
+phenology_dates2000 <- phenophases(BartlettIR2000df, internal = TRUE)
+
+# combinding transition dates
+combined_list <- list(
+  rising  = rbind(phenology_dates1000$rising,
+                  phenology_dates2000$rising),
+  falling = rbind(phenology_dates1000$falling,
+                  phenology_dates2000$falling)
+)
+
+# merging the timeseries here
+
+BartlettIR1000df_filtered <-
+  BartlettIR1000df$data[
+    !BartlettIR1000df$data$date %in% BartlettIR2000df$data$date, ]
+
+Bartlett_PhenocamTimeSeriesCorrected_08to2023 <-
+  rbind(BartlettIR1000df_filtered, BartlettIR2000df$data)
+
+
+rising_gcc_mean_df <-
+  combined_list$rising[combined_list$rising$gcc == "gcc_mean", ]
+
+falling_gcc_mean_df <-
+  combined_list$falling[combined_list$falling$gcc == "gcc_mean", ]
+
+rising_gcc_mean_df$datetime25 <-
+  as.POSIXct(rising_gcc_mean_df$transition_25 * 86400,
+             origin = "1970-01-01")
+rising_gcc_mean_df$year_25 <- year(rising_gcc_mean_df$datetime25)
+rising_gcc_mean_df$doy_25  <- yday(rising_gcc_mean_df$datetime25)
+
+falling_gcc_mean_df$datetime25 <-
+  as.POSIXct(falling_gcc_mean_df$transition_25 * 86400,
+             origin = "1970-01-01")
+falling_gcc_mean_df$year_25 <- year(falling_gcc_mean_df$datetime25)
+falling_gcc_mean_df$doy_25  <- yday(falling_gcc_mean_df$datetime25)
+
+# linear 
+lm_spring  <- lm(doy_25 ~ year_25, data = rising_gcc_mean_df)
+lm_autumn  <- lm(doy_25 ~ year_25, data = falling_gcc_mean_df)
+
+summary(lm_spring)
+summary(lm_autumn)
+
+# mk tests
+mk_spring  <- MannKendall(rising_gcc_mean_df$doy_25)
+mk_autumn  <- MannKendall(falling_gcc_mean_df$doy_25)
+
+mk_spring
+mk_autumn
+
+# growing season length 
+
+phenocam_gsl <- merge(
+  rising_gcc_mean_df[, c("year_25", "doy_25")],
+  falling_gcc_mean_df[, c("year_25", "doy_25")],
+  by = "year_25",
+  suffixes = c("_SOS", "_EOS")
+)
+
+phenocam_gsl$GSL <- phenocam_gsl$doy_25_EOS - phenocam_gsl$doy_25_SOS
+
+# linear regression
+lm_gsl <- lm(GSL ~ year_25, data = phenocam_gsl)
+summary(lm_gsl)
+
+# MK test
+mk_gsl <- MannKendall(phenocam_gsl$GSL)
+mk_gsl
+
+
+```
+
+
+
+
+Now determining gpp-derived phenology metrics using daily gpp and PhenoCam proccessing pipeline
+```{r}
+library(dplyr)
+library(zoo)
+
+#  phenological transition dates from daily GPP 
+extract_GPP_phases <- function(df, threshold_percent = 0.25) {
+  df <- df %>% filter(!is.na(GPP_mean)) 
+  if (!"Year" %in% names(df)) return(data.frame(Year = NA, SOS25 = NA, EOS25 = NA, GSL = NA))
+  if (nrow(df) < 100) return(data.frame(Year = unique(df$Year), SOS25 = NA, EOS25 = NA, GSL = NA))
+  
+  # LOESS smoothing of GPP, same as PhenoCam data proccessing pipeline.
+  loess_fit <- loess(GPP_mean ~ DOY, data = df, span = 0.2)
+  df$GPP_smooth <- predict(loess_fit)
+  
+  # calculate threshold based on seasonal amplitude
+  gpp_min <- min(df$GPP_smooth, na.rm = TRUE)
+  gpp_max <- max(df$GPP_smooth, na.rm = TRUE)
+  amplitude <- gpp_max - gpp_min
+  threshold_value <- gpp_min + threshold_percent * amplitude
+  
+  # identify SOS25: first crossing above threshold in spring
+  sos <- df %>%
+    filter(DOY > 30 & DOY < 200 & GPP_smooth > threshold_value) %>%
+    slice_head(n = 1) %>%
+    pull(DOY)
+  
+  # identify EOS25: last crossing above threshold in fall
+  eos <- df %>%
+    filter(DOY > 200 & DOY < 330 & GPP_smooth > threshold_value) %>%
+    slice_tail(n = 1) %>%
+    pull(DOY)
+  if (length(sos) == 0 || length(eos) == 0) {
+    return(data.frame(Year = unique(df$Year), SOS25 = NA, EOS25 = NA, GSL = NA))
+  }
+  gsl <- eos - sos
+  return(data.frame(Year = unique(df$Year), SOS25 = sos, EOS25 = eos, GSL = gsl))
+}
+
+# using daily data aggregate
+phenologydaily <- daily_avg %>%
+  mutate(
+    Date = as.Date(Date),
+    Year = as.numeric(format(Date, "%Y")),
+    DOY = as.numeric(format(Date, "%j"))
+  ) %>%
+  filter(!is.na(GPP_mean))
+
+# using the functions to extract sos and eos across all years
+library(purrr)
+gpp_pheno_results <- phenologydaily %>%
+  group_split(Year) %>%
+  purrr::map_dfr(~ extract_GPP_phases(.x))
+
+print(gpp_pheno_results)
+
+# plotting results
+ggplot(gpp_pheno_results, aes(x = Year, y = SOS25)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = TRUE, color = "forestgreen") +
+  labs(title = "Start of Season (SOS25) Over Time", y = "Day of Year", x = "Year")
+
+lm_sos <- lm(SOS25 ~ Year, data = gpp_pheno_results)
+summary(lm_sos)
+
+
+
+ggplot(gpp_pheno_results, aes(x = Year, y = EOS25)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = TRUE, color = "firebrick") +
+  labs(title = "End of Season (EOS25) Over Time", y = "Day of Year", x = "Year")
+
+#trends
+lm_eos <- lm(EOS25 ~ Year, data = gpp_pheno_results)
+summary(lm_eos)
+
+
+ggplot(gpp_pheno_results, aes(x = Year, y = GSL)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = TRUE, color = "steelblue") +
+  labs(title = "Growing Season Length (GSL) Over Time", y = "Days", x = "Year")
+
+#trends
+lm_gsl <- lm(GSL ~ Year, data = gpp_pheno_results)
+summary(lm_gsl)
+
+
+# checking mk trends
+library(trend)
+mk_sos <- mk.test(gpp_pheno_results$SOS25)
+mk_eos <- mk.test(gpp_pheno_results$EOS25)
+mk_gsl <- mk.test(gpp_pheno_results$GSL)
+
+mk_sos
+mk_eos
+mk_gsl
+```
+
+
+Correlations between phenology and the soil and air temperature
+```{r}
+# filter months
+SpringTemps5  <- monthly_avg %>% filter(Month == "5")
+SpringTemps10 <- monthly_avg %>% filter(Month == "10")
+
+# add the phenology dates
+SpringTemps5$Spring  <- growing_season_info$start_DOY
+SpringTemps10$Autumn <- growing_season_info$end_DOY
+
+# function to extract slope + SE + p-value
+get_stats <- function(model, var){
+  coefs <- summary(model)$coefficients
+  slope <- coefs[var, "Estimate"]
+  se    <- coefs[var, "Std. Error"]
+  pval  <- coefs[var, "Pr(>|t|)"]
+  list(slope = slope, se = se, p = pval)
+}
+
+may_air_stats  <- get_stats(lm_may_air,  "Tair")
+may_soil_stats <- get_stats(lm_may_soil, "TS_F_1_2_1")
+
+oct_air_stats  <- get_stats(lm_oct_air,  "Tair")
+oct_soil_stats <- get_stats(lm_oct_soil, "TS_F_1_2_1")
+
+# May correlations
+cor_may_air  <- cor.test(SpringTemps5$Spring,  SpringTemps5$Tair)
+cor_may_soil <- cor.test(SpringTemps5$Spring,  SpringTemps5$TS_F_1_2_1)
+
+# October correlations
+cor_oct_air  <- cor.test(SpringTemps10$Autumn, SpringTemps10$Tair)
+cor_oct_soil <- cor.test(SpringTemps10$Autumn, SpringTemps10$TS_F_1_2_1)
+
+cat("May air temp slope:", round(may_air_stats$slope, 2), "±", round(may_air_stats$se, 2), "\n")
+cat("May soil temp slope:", round(may_soil_stats$slope, 2), "±", round(may_soil_stats$se, 2), "\n")
+
+cat("Oct air temp slope:", round(oct_air_stats$slope, 2), "±", round(oct_air_stats$se, 2), "\n")
+cat("Oct soil temp slope:", round(oct_soil_stats$slope, 2), "±", round(oct_soil_stats$se, 2), "\n")
+
+```
+

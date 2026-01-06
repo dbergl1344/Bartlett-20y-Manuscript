@@ -1,0 +1,172 @@
+---
+title: "PCA"
+output: html_document
+date: "2025-12-30"
+---
+
+```{r}
+# Prepare monthly climate anomalies
+# Monthly climate anomalies (6 variables × 12 months = 72 features)
+monthly_wide <- dsMonthly %>%
+  select(
+    Year, Month,
+    VPD       = VPD_monthly_anomaly,
+    Tair      = Tair_monthly_anomaly,
+    SoilTemp  = TS_F_1_2_1_monthly_anomaly,
+    SWC       = SWC_AverageNew_monthly_anomaly,
+    PPFD_dir  = PPFD_dir_f_monthly_anomaly,
+    PPFD_dif  = PPFD_diff_f_monthly_anomaly
+  ) %>%
+  pivot_wider(
+    names_from  = Month,
+    values_from = c(VPD, Tair, SoilTemp, SWC, PPFD_dir, PPFD_dif),
+    names_sep   = "_M"
+  )
+
+# Annual flux anomalies
+annual_flux <- flux_pca_annual %>%
+  select(
+    Year,
+    NEP_anom  = NEP_anom,
+    GPP_anom  = GPP_anom,
+    Reco_anom = Reco_anom
+  )
+
+# Combine flux anomalies with monthly climate anomalies
+pca_input <- left_join(annual_flux, monthly_wide, by = "Year") %>%
+  drop_na()
+
+# Scale climate predictors
+climate_matrix <- pca_input %>%
+  select(-Year, -NEP_anom, -GPP_anom, -Reco_anom) %>%
+  scale()
+
+# Run the monthly climate PCA
+
+pca_monthly <- prcomp(climate_matrix, center = TRUE, scale. = TRUE)
+
+# Extract annual PC scores
+pc_scores <- as.data.frame(pca_monthly$x)
+
+# PCA dataframe
+flux_pca <- bind_cols(
+  pca_input %>% select(Year, NEP_anom, GPP_anom, Reco_anom),
+  pc_scores
+)
+
+# PC selection based on flux correlations
+
+
+pc_flux_cor <- cor(
+  flux_pca %>% select(starts_with("PC")),
+  flux_pca %>% select(NEP_anom, GPP_anom, Reco_anom),
+  use = "complete.obs"
+)
+
+pc_flux_cor_df <- pc_flux_cor %>%
+  as.data.frame() %>%
+  rownames_to_column("PC") %>%
+  pivot_longer(-PC, names_to = "Flux", values_to = "r") %>%
+  filter(abs(r) >= 0.40)
+
+# PCs retained in the manuscript
+pcs_reco <- c("PC1", "PC2")
+pcs_gpp  <- c("PC5", "PC6")
+pcs_nep  <- c("PC1", "PC2", "PC5", "PC6")
+
+# Interpretation of PC Loadings
+
+loadings <- as.data.frame(pca_monthly$rotation) %>%
+  rownames_to_column("Variable")
+
+important_loadings <- loadings %>%
+  select(Variable, all_of(unique(c(pcs_reco, pcs_gpp)))) %>%
+  pivot_longer(-Variable, names_to = "PC", values_to = "Loading") %>%
+  filter(abs(Loading) >= 0.20)
+
+# Winter Severity Index (WSI)
+
+winter_severity <- winter_climate_flux %>%
+  mutate(
+    snow_z  = scale(snow_depth_anom)[,1],
+    frost_z = scale(frost_depth_anom)[,1],
+    soil_z  = scale(soil_temp_anom)[,1],
+    air_z   = scale(air_temp_anom)[,1],
+    winter_severity_index = -snow_z - frost_z + soil_z + air_z
+  ) %>%
+  select(Year, winter_severity_index)
+
+# Final Interannual Variability Models
+
+
+final_data <- flux_pca %>%
+  left_join(winter_severity, by = "Year")
+
+# Ecosystem respiration
+model_reco <- lm(
+  Reco_anom ~ PC1 + PC2 + winter_severity_index,
+  data = final_data
+)
+
+# Gross primary productivity
+model_gpp <- lm(
+  GPP_anom ~ PC5 + PC6,
+  data = final_data
+)
+
+# Net ecosystem production
+model_nep <- lm(
+  NEP_anom ~ PC1 + PC2 + PC5 + PC6 + winter_severity_index,
+  data = final_data
+)
+
+# Model summaries
+summary(model_reco)
+summary(model_gpp)
+summary(model_nep)
+
+AIC(model_reco, model_gpp, model_nep)
+
+# Long-Term Trend Attribution
+
+
+lm_pc1_trend  <- lm(PC1 ~ Year, data = final_data)
+lm_reco_trend <- lm(Reco_anom ~ Year, data = final_data)
+lm_nep_trend  <- lm(NEP_anom  ~ Year, data = final_data)
+
+summary(lm_pc1_trend)
+summary(lm_reco_trend)
+summary(lm_nep_trend)
+
+# Phenology Relationships with Climate PCs (Supporting)
+
+
+# Join phenology metrics with PCs
+pheno_pc <- gpp_pheno_results %>%
+  select(Year, SOS25, EOS25, GSL) %>%
+  left_join(
+    flux_pca %>% select(Year, PC5, PC6),
+    by = "Year"
+  ) %>%
+  drop_na()
+
+# Spring onset
+lm_SOS_PC5 <- lm(SOS25 ~ PC5, data = pheno_pc)
+lm_SOS_PC6 <- lm(SOS25 ~ PC6, data = pheno_pc)
+
+# Autumn senescence
+lm_EOS_PC5 <- lm(EOS25 ~ PC5, data = pheno_pc)
+lm_EOS_PC6 <- lm(EOS25 ~ PC6, data = pheno_pc)
+
+# Growing season length
+lm_GSL_PC56 <- lm(GSL ~ PC5 + PC6, data = pheno_pc)
+
+# Summaries
+summary(lm_SOS_PC5)
+summary(lm_SOS_PC6)
+summary(lm_EOS_PC5)
+summary(lm_EOS_PC6)
+summary(lm_GSL_PC56)
+
+```
+

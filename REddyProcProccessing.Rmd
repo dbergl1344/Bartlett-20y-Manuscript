@@ -1,10 +1,10 @@
 ---
 title: "REddyProc Proccessing"
 output: html_document
-date: "2026-01-02"
+date: "2025-12-30"
 ---
 
-# Load the necessary libraries 
+# Libraries
 ```{r}
 library(tidyverse)
 library(dplyr)
@@ -15,8 +15,7 @@ library(bigleaf)
 ```
 
 
-
-# Make a new dataset to work with for REddyProc to keep the original one unaltered and keep the years only 2024_2023
+Make a new dataset to work with for REddyProc to keep the original one unaltered
 ```{r}
 REddy2004_2023 <- as.data.frame(Bart04_23AmeriFlux)
 # Filter the dataframe to include only rows where Year is between 2004 and 2023
@@ -25,26 +24,26 @@ REddy2004_2023 <- REddy2004_2023[REddy2004_2023$Year >= 2004 & REddy2004_2023$Ye
 colnames(REddy2004_2023)
 ```
 
-#Calculating the VPD from RH and Tair
+Calculating the VPD from RH and Tair
 ```{r}
 REddy2004_2023 <- cbind(REddy2004_2023, VPD = fCalcVPDfromRHandTair(REddy2004_2023$RH_F_1_1_1, REddy2004_2023$TA_F_1_1_1))
 head(REddy2004_2023$VPD)
 ```
 
 
-# Adding other neccessary columns here for REddyProc 
+Adding other neccessary columns here for REddyProc 
 ```{r}
 REddy2004_2023$Rg <- PPFD.to.Rg(REddy2004_2023$PPFD_IN_F_1_1_1)
-range(REddy2004_2023$Rg) # This range looks correct
+range(REddy2004_2023$Rg) # checking ranges to make sure units are correct
 REddy2004_2023$Tair <- REddy2004_2023$TA_F_1_1_1
 REddy2004_2023$Ustar <- REddy2004_2023$USTAR_1_1_1
 ```
 
 
 
-# now converting things to POSIX 
+Now converting things to POSIX 
 ```{r}
-# Make sure that all of these are in a numeric format
+# numeric format
 REddy2004_2023$Year   <- as.numeric(REddy2004_2023$Year)
 REddy2004_2023$Month  <- as.numeric(REddy2004_2023$Month)
 REddy2004_2023$Day    <- as.numeric(REddy2004_2023$Day)
@@ -60,24 +59,24 @@ Bartlett.Posix.04_23 <- fConvertTimeToPosix(REddy2004_2023,
                                            Min = 'Minute')
 ```
 
-# Now making your SEddyProc class for ReddyProc and setting the location information
+Making an SEddyProc class for ReddyProc and setting the location information
 ```{r}
 Bart.BRT <- sEddyProc$new('US-Bar', Bartlett.Posix.04_23, c('NEE','Rg','Tair','VPD', 'Ustar'))
-Bart.BRT$`.->sDATA`$sDateTime # REddyProc DateTime column that is created ends up being in the 15, 45 stamps, but when you export it, it is correct per what Thomas Wultzer said in his email.
+Bart.BRT$`.->sDATA`$sDateTime
 
-# Set location information
+# set location information
 Bart.BRT$sSetLocationInfo(LatDeg = 44.0646, LongDeg = -71.2881, TimeZoneHour = -5) 
 ```
 
 
 
-# Here is the code for computing IQR:
+Computing IQR:
 ```{r}
 Bart.BRT$sMDSGapFill('NEE')
 summary(Bart.BRT$sTEMP$NEE_orig)
 summary(Bart.BRT$sTEMP$NEE_fall)
 
-### Check for outliers using IQR of residuals (>6*IQR is outlier)
+### check for outliers using IQR of residuals (>6*IQR is outlier)
 residual=Bart.BRT$sTEMP$NEE_orig-Bart.BRT$sTEMP$NEE_fall
 IQR=IQR(residual,na.rm=TRUE)
 outlier=ifelse(abs(residual)>(IQR*6),1,0)
@@ -85,10 +84,12 @@ NEE_filt=ifelse(outlier==0,Bart.BRT$sTEMP$NEE_orig,NA)
 print(IQR)
 summary(residual)
 summary(outlier)
-### Plot outliers
+
+### plot outliers
 EddieC=data.frame(Bart.BRT$sTEMP$sDateTime,Bart.BRT$sTEMP$NEE_orig,Bart.BRT$sDATA$Ustar,Bart.BRT$sTEMP$NEE_fall,residual,outlier,NEE_filt)
 colnames(EddieC)=c('sDateTime','NEE_orig','Ustar','NEE_fall','residual','outlier','NEE_filt')
-### Number and Percentage of outliers
+
+### number and percentage of outliers
 sum(as.numeric(EddieC$outlier),na.rm=TRUE)
 sum(as.numeric(EddieC$outlier),na.rm=TRUE)/length(EddieC$outlier)
 
@@ -105,11 +106,12 @@ summary(EddieC)
 ggplot(EddieC,aes(y=abs(residual),x=Ustar,color=outlier))+
   geom_point()
 
-### Re-run the outlier test after initial filtering
+### re-run the outlier test after initial filtering
 EddieC$residual2=EddieC$NEE_filt-EddieC$NEE_fall
 EddieC$IQR2=IQR(EddieC$residual2,na.rm=TRUE)
 EddieC$outlier2=ifelse(abs(EddieC$residual2)>EddieC$IQR2*6,1,0)
-### Number and Percentage of outliers
+
+### number and percentage of outliers
 sum(as.numeric(EddieC$outlier2),na.rm=TRUE)
 sum(as.numeric(EddieC$outlier2),na.rm=TRUE)/length(EddieC$outlier2)
 
@@ -117,13 +119,12 @@ EddieC$NEE_filt2=ifelse(EddieC$outlier2==0,EddieC$NEE_filt,NA)
 ggplot(EddieC,aes(y=abs(residual2),x=Ustar,color=outlier2))+
   geom_point()
 
-### Remove outliers
+### remove outliers
 Bart.BRT$sDATA$NEE=EddieC$NEE_filt2
 ```
 
 
-# Continuing with REddyProc Processing
-
+Continuing with REddyProc Processing
 ```{r}
 Bart.BRT$sMDSGapFill("Tair", FillAll =FALSE)
 Bart.BRT$sMDSGapFill("VPD", FillAll =FALSE)
@@ -132,7 +133,6 @@ Bart.BRT$sMDSGapFill("Rg", FillAll =FALSE)
 set.seed(123456)
 Bart.BRT$sEstimateUstarScenarios(nSample = 700L, probs = c(0.05, 0.5, 0.95))
 
-##Not chaning my uStarTh for this, as I want the same uStar as my last run
 uStarTh <- Bart.BRT$sGetEstimatedUstarThresholdDistribution()
 uStar <- uStarTh  %>%
      filter( aggregationMode == "single") %>%
@@ -145,7 +145,7 @@ Bart.BRT$sGetUstarScenarios()
 Bart.BRT$sMDSGapFillUStarScens('NEE')
 ```
 
-# Now examining the Ustar filtering and adding it to the dataframe for BRT gap-filling
+Now examining the Ustar filtering and adding it to the dataframe for BRT gap-filling
 ```{r}
 REddy2004_2023$NEEIQR_orig <- Bart.BRT$`.->sDATA`$NEE
 
@@ -154,38 +154,495 @@ colnames(REddy2004_2023)
 print(sum(is.na(REddy2004_2023$NEE)))
 print(sum(is.na(REddy2004_2023$NEEIQR_orig)))
 
-# Just to make sure I am doing this instead
+# just to make sure I am doing this instead
 REddy2004_2023 <- REddy2004_2023 %>%
   mutate(
     NEEU05_orig = ifelse(Ustar >= 0.292441, NEEIQR_orig, NA),
     NEEU50_orig = ifelse(Ustar >= 0.3557708, NEEIQR_orig, NA),
     NEEU95_orig = ifelse(Ustar >= 0.4193314, NEEIQR_orig, NA)
   )
-
-
-print(sum(is.na(REddy2004_2023$NEE)))
-print(sum(is.na(REddy2004_2023$NEEIQR_orig)))
-print(sum(is.na(REddy2004_2023$NEEU05_orig)))
-print(sum(is.na(REddy2004_2023$NEEU50_orig)))
-print(sum(is.na(REddy2004_2023$NEEU95_orig)))
-
-write.csv(U05Input04_23, file = "~/Desktop/Python_XGB/NEE_U50_Python/AmeriFlux/U05Input04_23.csv")
-write.csv(U50Input04_23, file = "~/Desktop/Python_XGB/NEE_U50_Python/AmeriFlux/U50Input04_23.csv")
-write.csv(U95Input04_23, file = "~/Desktop/Python_XGB/NEE_U50_Python/AmeriFlux/U95Input04_23.csv")
-
-
-#XGB final model parameters: 
-# Start to run the optimizer ...
-# XGBoost_regression took 464.40 seconds,  candidates checked: 40, best CV score: -2.098 ± 0.026
-# Best parameters:
-# OrderedDict([('colsample_bytree', 0.7538607571502197), ('learning_rate', 0.035310272828400296), ('max_depth', 6), ('n_estimators', 714), ('reg_alpha', 5.243049953323151), ('reg_lambda', 9.948506725979197), ('subsample', 0.7446697286156256)])
-# Running: best_params=OrderedDict([('colsample_bytree', 0.7538607571502197), ('learning_rate', 0.035310272828400296), ('max_depth', 6), ('n_estimators', 714), ('reg_alpha', 5.243049953323151), ('reg_lambda', 9.948506725979197), ('subsample', 0.7446697286156256)])
-# Data has been written to /Users/DarbyBergl/Desktop/Python_XGB/NEE_U50_Python/AmeriFlux/XGB_models/model_best_paramsDec18.csv
-# Model pkl files saved to /Users/DarbyBergl/Desktop/Python_XGB/NEE_U50_Python/AmeriFlux/XGB_models/model04_23Dec18.pkl.
 ```
 
 
 
 
+Starting with the nighttime partitioning, U50 first.
+```{r}
+# "datetime": timestamp column (POSIXct format)
+# "NEE": Net Ecosystem Exchange (in µmol CO2 m-2 s-1)
+# "Soil_Temp": Soil temperature (in degrees Celsius)
+# "Rg": Radiation (in W/m²)
+
+# convert soil temperature to Kelvin for the model
+data <- REddy2004_2023
+data$NEEU05_f <- NewBart.df$NEEU05_f
+data$NEEU50_f <- NewBart.df$NEEU50_f
+# this was the original but now taking from NewBart.df data$NEEU50_f <- output_predictionDec18$XGB_NEE_U50_f
+data$NEEU95_f <- NewBart.df$NEEU95_f
 
 
+data <- data %>%
+  mutate(T_soil_K = TS_F_1_2_1 + 273.15)
+night_data <- data %>% filter(Rg < 10)
+
+# MR2: Model Residuals 2 (Seasonal/Moving Window Reco) 
+library(minpack.lm)
+library(dplyr)
+library(zoo)
+df <- data
+df<- as.data.frame(df)
+
+# making sure there are no NAs in the variables that are use for the partitioning here.
+print(sum(is.na(data$T_soil_K)))
+print(sum(is.na(data$Rg)))
+print(sum(is.na(data$NEEU50_f)))
+
+
+# function to estimate Reco parameters (R_ref and E0) using nighttime data
+estimate_reddyproc_params <- function(night_data, T_ref = 273.15 + 15, T_0 = -46.02 + 273.15, perc_trim = 5) {
+  night_data <- as.data.frame(night_data)
+  night_data$NEEU50_f <- as.numeric(night_data$NEEU50_f)
+  night_data_cleaned <- night_data %>%
+    filter(NEEU50_f >= 0)
+  
+  lower_bound <- quantile(night_data_cleaned$NEEU50_f, perc_trim / 100, na.rm = TRUE)
+  upper_bound <- quantile(night_data_cleaned$NEEU50_f, 1 - (perc_trim / 100), na.rm = TRUE)
+  
+  trimmed_data <- night_data_cleaned %>%
+    filter(NEEU50_f >= lower_bound & NEEU50_f <= upper_bound)
+  
+  # calculate initial guesses for R_ref and E0 based on trimmed data
+  R_ref_guess <- max(median(trimmed_data$NEEU50_f, na.rm = TRUE), 0.01) 
+  E0_guess <- 150
+  
+  # Lloyd-Taylor model for Reco
+  lloyd_taylor <- function(R_ref, E0, T_soil) {
+    R_ref * exp(E0 * ((1 / (T_ref - T_0)) - (1 / (T_soil - T_0))))
+  }
+  
+  fit <- tryCatch(
+    {
+      nlsLM(NEEU50_f ~ lloyd_taylor(R_ref, E0, T_soil_K), 
+            data = trimmed_data,  # Use trimmed data for fitting
+            start = list(R_ref = R_ref_guess, E0 = E0_guess),
+            lower = c(0.01, 50),  # Avoid zero or negative values for R_ref and E0
+            upper = c(20, 400),   # Set reasonable upper bounds
+            control = nls.lm.control(maxiter = 1000, ftol = 1e-8))
+    },
+    error = function(e) {
+      message("nlsLM fit failed: ", conditionMessage(e))
+      return(NULL)
+    }
+  )
+  
+  if (!is.null(fit) && !any(is.na(coef(fit)))) {
+    return(coef(fit))
+  } else {
+    return(c(NA, NA))
+  }
+}
+
+# function to apply the MR2 model to estimate Reco over a rolling window
+estimate_reco_mr2 <- function(df, window_days = 7, T_ref = 273.15 + 15, T_0 = -46.02 + 273.15) {
+  # convert window_days to number of data points (assuming half-hourly data)
+  window_size <- window_days * 48
+  
+  # ensure df is a clean data frame and relevant columns are numeric
+  df <- as.data.frame(df)
+  df$Rg <- as.numeric(df$Rg)
+  df$NEEU50_f <- as.numeric(df$NEEU50_f)
+  df$T_soil_K <- as.numeric(df$T_soil_K)
+  
+  # initialize empty columns for Reco parameters
+  df$R_ref <- NA
+  df$E0 <- NA
+  
+  # function to fit Lloyd-Taylor model within a rolling window
+  fit_reco_params <- function(sub_df) {
+    sub_df <- as.data.frame(sub_df)
+    
+    # filter for nighttime data (where Rg < 10)
+    night_data <- sub_df %>% filter(Rg < 10)
+    
+    # ensure columns are numeric
+    night_data$NEEU50_f <- as.numeric(night_data$NEEU50_f)
+    night_data$T_soil_K <- as.numeric(night_data$T_soil_K)
+    
+    # check for valid number of nighttime points
+    if (nrow(night_data) < 10) {
+      return(c(NA, NA))
+    }
+    
+    #eEstimate R_ref and E0 using cleaned nighttime data
+    params <- estimate_reddyproc_params(night_data, T_ref, T_0)
+    return(params)
+  }
+  
+  # apply rolling window to estimate Reco parameters
+  rolling_params <- rollapplyr(df, window_size, fit_reco_params, by.column = FALSE, fill = NA, align = 'right')
+  
+  # fill parameter values in the main data frame
+  df$R_ref <- zoo::na.locf(rolling_params[,1], na.rm = FALSE)
+  df$E0 <- zoo::na.locf(rolling_params[,2], na.rm = FALSE)
+  
+  # calculate Reco using the rolling parameters
+  df <- df %>%
+    mutate(RecoU50 = R_ref * exp(E0 * ((1 / (T_ref - T_0)) - (1 / (T_soil_K - T_0)))),
+           GPPU50 = RecoU50 - NEEU50_f)  # Use all NEEU50_f values for GPP calculation
+  
+  return(df)
+}
+
+# applying MR2 partitioning using a 7-day window for short-term sensitivity
+fulldata <- estimate_reco_mr2(data, window_days = 7)
+
+
+### Finishing the partitioning on the first DateTimes where I could not get estimates because of the rolling window 
+fulldata$DateTime <- NewBart.df$DateTime
+# define the NA subset from the full data
+na_subset <- fulldata %>% filter(is.na(R_ref))
+
+# get the start and end of the NA date range
+na_start <- min(na_subset$DateTime)
+na_end <- max(na_subset$DateTime)
+
+# extract the first week from the na_subset
+buffer_week <- na_subset %>%
+  filter(DateTime >= na_start & DateTime < (na_start + days(7)))
+
+# create a duplicated week before the original start to aid in rolling window estimation
+duplicated_buffer_week <- buffer_week
+duplicated_buffer_week$DateTime <- duplicated_buffer_week$DateTime - days(7)
+
+# combine duplicated buffer with the original NA subset
+extended_na_subset <- bind_rows(duplicated_buffer_week, na_subset)
+
+# apply the rolling window estimation to the extended NA data
+subset_data_mr2 <- estimate_reco_mr2(extended_na_subset, window_days = 7)
+
+# filter back to only the original NA subset data (without the duplicated week)
+subset_data_mr2 <- subset_data_mr2 %>%
+  filter(DateTime >= na_start & DateTime <= na_end)
+
+# now `subset_data_mr2` contains the filled predictions for the NA date range and now we going to merge the dataset so that I have a full list of predictions!
+# merge the predicted subset back into the full dataset
+filled_data <- fulldata %>%
+  # Join with subset data to fill NA values
+  left_join(subset_data_mr2, by = "DateTime", suffix = c("", "_filled"))
+
+# fill the original columns in fulldata with the predicted values from the subset
+filled_data <- filled_data %>%
+  mutate(
+    R_ref = ifelse(is.na(R_ref), R_ref_filled, R_ref),
+    E0 = ifelse(is.na(E0), E0_filled, E0),
+    RecoU50 = ifelse(is.na(RecoU50), RecoU50_filled, RecoU50),
+    GPPU50 = ifelse(is.na(GPPU50), GPPU50_filled, GPPU50)
+  ) %>%
+  select(-ends_with("_filled"))
+
+# The `filled_data` now contains no NA values for R_ref, E0, RecoU50, and GPPU50 in the original NA range
+
+NewBart.df$RecoU50 <- filled_data$RecoU50
+NewBart.df$GPPU50 <- filled_data$GPPU50
+NewBart.df$R_refU50 <- filled_data$R_ref
+NewBart.df$E0U50 <- filled_data$E0
+NewBart.df$TsoilKU50 <- filled_data$T_soil_K
+
+
+
+# NOW DOING THIS FOR U05 and U95! 
+# Function to estimate Reco parameters (R_ref and E0) using nighttime data
+# Function to estimate Reco parameters (R_refU05 and E0U05) using nighttime data
+estimate_reddyproc_paramsU05 <- function(night_data, T_refU05 = 273.15 + 15, T_0U05 = -46.02 + 273.15, perc_trim = 5) {
+  night_data <- as.data.frame(night_data)
+  night_data$NEEU05_f <- as.numeric(night_data$NEEU05_f)
+  night_data_cleaned <- night_data %>%
+    filter(NEEU05_f >= 0)
+
+  lower_boundU05 <- quantile(night_data_cleaned$NEEU05_f, perc_trim / 100, na.rm = TRUE)
+  upper_boundU05 <- quantile(night_data_cleaned$NEEU05_f, 1 - (perc_trim / 100), na.rm = TRUE)
+  
+  trimmed_dataU05 <- night_data_cleaned %>%
+    filter(NEEU05_f >= lower_boundU05 & NEEU05_f <= upper_boundU05)
+  
+  R_ref_guessU05 <- max(median(trimmed_dataU05$NEEU05_f, na.rm = TRUE), 0.01)  # Ensure R_refU05 is positive
+  E0_guessU05 <- 150
+  
+  # Lloyd-Taylor model for Reco
+  lloyd_taylor_U05 <- function(R_refU05, E0U05, T_soilU05) {
+    R_refU05 * exp(E0U05 * ((1 / (T_refU05 - T_0U05)) - (1 / (T_soilU05 - T_0U05))))
+  }
+  
+  fit_U05 <- tryCatch(
+    {
+      nlsLM(NEEU05_f ~ lloyd_taylor_U05(R_refU05, E0U05, T_soil_K), 
+            data = trimmed_dataU05,  # Use trimmed data for fitting
+            start = list(R_refU05 = R_ref_guessU05, E0U05 = E0_guessU05),
+            lower = c(0.01, 50),  # Avoid zero or negative values for R_refU05 and E0U05
+            upper = c(20, 400),   # Set reasonable upper bounds
+            control = nls.lm.control(maxiter = 1000, ftol = 1e-8))
+    },
+    error = function(e) {
+      message("nlsLM fit failed: ", conditionMessage(e))
+      return(NULL)
+    }
+  )
+  if (!is.null(fit_U05) && !any(is.na(coef(fit_U05)))) {
+    return(coef(fit_U05))
+  } else {
+    return(c(NA, NA))
+  }
+}
+
+estimate_reco_mr2U05 <- function(df, window_days = 7, T_refU05 = 273.15 + 15, T_0U05 = -46.02 + 273.15) {
+  window_size <- window_days * 48
+  df <- as.data.frame(df)
+  df$Rg <- as.numeric(df$Rg)
+  df$NEEU05_f <- as.numeric(df$NEEU05_f)
+  df$T_soil_K <- as.numeric(df$T_soil_K)
+  
+  df$R_refU05 <- NA
+  df$E0U05 <- NA
+  
+  # Function to fit Lloyd-Taylor model within a rolling window
+  fit_reco_paramsU05 <- function(sub_dfU05) {
+    sub_dfU05 <- as.data.frame(sub_dfU05)
+    
+    # Filter for nighttime data (where Rg < 10)
+    night_dataU05 <- sub_dfU05 %>% filter(Rg < 10)
+    
+    # Ensure columns are numeric
+    night_dataU05$NEEU05_f <- as.numeric(night_dataU05$NEEU05_f)
+    night_dataU05$T_soil_K <- as.numeric(night_dataU05$T_soil_K)
+    if (nrow(night_dataU05) < 10) {
+      return(c(NA, NA))
+    }
+    
+    # Estimate R_refU05 and E0U05 using cleaned nighttime data
+    paramsU05 <- estimate_reddyproc_paramsU05(night_dataU05, T_refU05, T_0U05)
+    return(paramsU05)
+  }
+  
+  # Apply rolling window to estimate Reco parameters
+  rolling_paramsU05 <- rollapplyr(df, window_size, fit_reco_paramsU05, by.column = FALSE, fill = NA, align = 'right')
+  
+  # Fill parameter values in the main data frame
+  df$R_refU05 <- zoo::na.locf(rolling_paramsU05[,1], na.rm = FALSE)
+  df$E0U05 <- zoo::na.locf(rolling_paramsU05[,2], na.rm = FALSE)
+  
+  # Calculate RecoU05 using the rolling parameters
+  df <- df %>%
+    mutate(RecoU05 = R_refU05 * exp(E0U05 * ((1 / (T_refU05 - T_0U05)) - (1 / (T_soil_K - T_0U05)))),
+           GPPU05 = RecoU05 - NEEU05_f)  # Use all NEEU05_f values for GPP calculation
+  
+  return(df)
+}
+
+# Apply MR2 partitioning with a larger window size
+fulldata <- estimate_reco_mr2U05(data, window_days = 7)
+
+
+### Finishing the partitioning on the first DateTimes where I could not get estimates because of the rolling window 
+fulldata$DateTime <- NewBart.df$DateTime
+# Define the NA subset from the full data where R_refU05 is NA
+na_subset <- fulldata %>% filter(is.na(R_refU05))
+
+# Get the start and end of the NA date range
+na_start <- min(na_subset$DateTime, na.rm = TRUE)
+na_end <- max(na_subset$DateTime, na.rm = TRUE)
+
+# Extract the first week from the na_subset
+buffer_week <- na_subset %>%
+  filter(DateTime >= na_start & DateTime < (na_start + days(7)))
+
+# Create a duplicated week before the original start to aid in rolling window estimation
+duplicated_buffer_week <- buffer_week
+duplicated_buffer_week$DateTime <- duplicated_buffer_week$DateTime - days(7)
+
+# Combine duplicated buffer with the original NA subset
+extended_na_subset <- bind_rows(duplicated_buffer_week, na_subset)
+
+# Apply the rolling window estimation to the extended NA data
+subset_data_mr2U05 <- estimate_reco_mr2U05(extended_na_subset, window_days = 7)
+
+# Filter back to only the original NA subset data (without the duplicated week)
+subset_data_mr2U05 <- subset_data_mr2U05 %>%
+  filter(DateTime >= na_start & DateTime <= na_end)
+
+# Now `subset_data_mr2U05` contains the filled predictions for the NA date range
+# Merge the predicted subset back into the full dataset
+
+filled_data <- fulldata %>%
+  # Join with subset data to fill NA values
+  left_join(subset_data_mr2U05, by = "DateTime", suffix = c("", "_filled"))
+
+# Correct the filling logic with appropriate column names
+filled_data <- filled_data %>%
+  mutate(
+    R_refU05 = ifelse(is.na(R_refU05), R_refU05_filled, R_refU05),
+    E0U05 = ifelse(is.na(E0U05), E0U05_filled, E0U05),
+    RecoU05 = ifelse(is.na(RecoU05), RecoU05_filled, RecoU05),
+    GPPU05 = ifelse(is.na(GPPU05), GPPU05_filled, GPPU05)
+  ) %>%
+  # Drop the extra "_filled" columns now that values are filled
+  select(-ends_with("_filled"))
+
+# View the final dataset with filled values
+head(filled_data)
+colnames(filled_data)
+
+NewBart.df$RecoU05 <- filled_data$RecoU05
+NewBart.df$GPPU05 <- filled_data$GPPU05
+NewBart.df$R_refU05 <- filled_data$R_refU05
+NewBart.df$E0U05 <- filled_data$E0U05
+NewBart.df$TsoilKU05 <- filled_data$T_soil_K
+
+## U95 
+
+# Function to estimate Reco parameters (R_refU95 and E0U95) using nighttime data
+estimate_reddyproc_paramsU95 <- function(night_data, T_refU95 = 273.15 + 15, T_0U95 = -46.02 + 273.15, perc_trim = 5) {
+  night_data <- as.data.frame(night_data)
+  night_data$NEEU95_f <- as.numeric(night_data$NEEU95_f)
+  night_data_cleaned <- night_data %>%
+    filter(NEEU95_f >= 0)
+  lower_boundU95 <- quantile(night_data_cleaned$NEEU95_f, perc_trim / 100, na.rm = TRUE)
+  upper_boundU95 <- quantile(night_data_cleaned$NEEU95_f, 1 - (perc_trim / 100), na.rm = TRUE)
+  
+  trimmed_dataU95 <- night_data_cleaned %>%
+    filter(NEEU95_f >= lower_boundU95 & NEEU95_f <= upper_boundU95)
+  
+
+  R_ref_guessU95 <- max(median(trimmed_dataU95$NEEU95_f, na.rm = TRUE), 0.01) 
+  E0_guessU95 <- 150
+  
+  # Lloyd-Taylor model for Reco
+  lloyd_taylor_U95 <- function(R_refU95, E0U95, T_soilU95) {
+    R_refU95 * exp(E0U95 * ((1 / (T_refU95 - T_0U95)) - (1 / (T_soilU95 - T_0U95))))
+  }
+  
+  # Fit the model using nlsLM with bounds for parameters
+  fit_U95 <- tryCatch(
+    {
+      nlsLM(NEEU95_f ~ lloyd_taylor_U95(R_refU95, E0U95, T_soil_K), 
+            data = trimmed_dataU95,  # Use trimmed data for fitting
+            start = list(R_refU95 = R_ref_guessU95, E0U95 = E0_guessU95),
+            lower = c(0.01, 50),  # Avoid zero or negative values for R_refU95 and E0U95
+            upper = c(20, 400),   # Set reasonable upper bounds
+            control = nls.lm.control(maxiter = 1000, ftol = 1e-8))
+    },
+    error = function(e) {
+      message("nlsLM fit failed: ", conditionMessage(e))
+      return(NULL)
+    }
+  )
+  
+  # Return fit coefficients if successful, else return NA
+  if (!is.null(fit_U95) && !any(is.na(coef(fit_U95)))) {
+    return(coef(fit_U95))
+  } else {
+    return(c(NA, NA))
+  }
+}
+
+# Function to apply the MR2 model to estimate RecoU95 over a rolling window
+estimate_reco_mr2U95 <- function(df, window_days = 7, T_refU95 = 273.15 + 15, T_0U95 = -46.02 + 273.15) {
+  window_size <- window_days * 48
+  
+  df <- as.data.frame(df)
+  df$Rg <- as.numeric(df$Rg)
+  df$NEEU95_f <- as.numeric(df$NEEU95_f)
+  df$T_soil_K <- as.numeric(df$T_soil_K)
+  
+  df$R_refU95 <- NA
+  df$E0U95 <- NA
+  
+  # Function to fit Lloyd-Taylor model within a rolling window
+  fit_reco_paramsU95 <- function(sub_dfU95) {
+    sub_dfU95 <- as.data.frame(sub_dfU95)
+    
+    # Filter for nighttime data (where Rg < 10)
+    night_dataU95 <- sub_dfU95 %>% filter(Rg < 10)
+    
+    # Ensure columns are numeric
+    night_dataU95$NEEU95_f <- as.numeric(night_dataU95$NEEU95_f)
+    night_dataU95$T_soil_K <- as.numeric(night_dataU95$T_soil_K)
+    
+    if (nrow(night_dataU95) < 10) {
+      return(c(NA, NA))
+    }
+    
+    # Estimate R_refU95 and E0U95 using cleaned nighttime data
+    paramsU95 <- estimate_reddyproc_paramsU95(night_dataU95, T_refU95, T_0U95)
+    return(paramsU95)
+  }
+  
+  # Apply rolling window to estimate Reco parameters
+  rolling_paramsU95 <- rollapplyr(df, window_size, fit_reco_paramsU95, by.column = FALSE, fill = NA, align = 'right')
+  
+  # Fill parameter values in the main data frame
+  df$R_refU95 <- zoo::na.locf(rolling_paramsU95[,1], na.rm = FALSE)
+  df$E0U95 <- zoo::na.locf(rolling_paramsU95[,2], na.rm = FALSE)
+  
+  # Calculate RecoU95 using the rolling parameters
+  df <- df %>%
+    mutate(RecoU95 = R_refU95 * exp(E0U95 * ((1 / (T_refU95 - T_0U95)) - (1 / (T_soil_K - T_0U95)))),
+           GPPU95 = RecoU95 - NEEU95_f)  # Use all NEEU95_f values for GPP calculation
+  
+  return(df)
+}
+
+fulldata <- estimate_reco_mr2U95(data, window_days = 7)
+
+
+### Finishing the partitioning on the first DateTimes where I could not get estimates because of the rolling window 
+fulldata$DateTime <- NewBart.df$DateTime
+na_subset <- fulldata %>% filter(is.na(R_refU95))
+
+# Get the start and end of the NA date range
+na_start <- min(na_subset$DateTime, na.rm = TRUE)
+na_end <- max(na_subset$DateTime, na.rm = TRUE)
+
+# Extract the first week from the na_subset
+buffer_week <- na_subset %>%
+  filter(DateTime >= na_start & DateTime < (na_start + days(7)))
+
+# Create a duplicated week before the original start to aid in rolling window estimation
+duplicated_buffer_week <- buffer_week
+duplicated_buffer_week$DateTime <- duplicated_buffer_week$DateTime - days(7)
+
+# Combine duplicated buffer with the original NA subset
+extended_na_subset <- bind_rows(duplicated_buffer_week, na_subset)
+
+# Apply the rolling window estimation to the extended NA data
+subset_data_mr2U95 <- estimate_reco_mr2U95(extended_na_subset, window_days = 7)
+
+# Filter back to only the original NA subset data (without the duplicated week)
+subset_data_mr2U95 <- subset_data_mr2U95 %>%
+  filter(DateTime >= na_start & DateTime <= na_end)
+
+# Now `subset_data_mr2U05` contains the filled predictions for the NA date range
+# Merge the predicted subset back into the full dataset
+
+filled_data <- fulldata %>%
+  # Join with subset data to fill NA values
+  left_join(subset_data_mr2U95, by = "DateTime", suffix = c("", "_filled"))
+
+# Correct the filling logic with appropriate column names
+filled_data <- filled_data %>%
+  mutate(
+    R_refU95 = ifelse(is.na(R_refU95), R_refU95_filled, R_refU95),
+    E0U95 = ifelse(is.na(E0U95), E0U95_filled, E0U95),
+    RecoU95 = ifelse(is.na(RecoU95), RecoU95_filled, RecoU95),
+    GPPU95 = ifelse(is.na(GPPU95), GPPU95_filled, GPPU95)
+  ) %>%
+  # Drop the extra "_filled" columns now that values are filled
+  select(-ends_with("_filled"))
+
+
+NewBart.df$RecoU95 <- filled_data$RecoU95
+NewBart.df$GPPU95 <- filled_data$GPPU95
+NewBart.df$R_refU95 <- filled_data$R_refU95
+NewBart.df$E0U95 <- filled_data$E0U95
+NewBart.df$TsoilKU95 <- filled_data$T_soil_K
+
+```

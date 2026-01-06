@@ -1,0 +1,32 @@
+---
+title: "Breakpoint Analysis"
+output: html_document
+date: "2025-12-30"
+---
+
+```{r}
+# Breakpoint in annual ecosystem respiration and winter contribution to annual carbon balance
+# Follows Possinger et al. (2025)
+library(strucchange)
+
+annual <- annual_avg_finalUstars %>%
+  select(Year, Reco_mean) %>%
+  arrange(Year)
+
+# No-break model
+fm0 <- lm(Reco_mean ~ Year, data = annual)
+
+# One-break model (minimum 5 years per segment)
+h_min <- 5
+bp <- breakpoints(Reco_mean ~ Year, data = annual, breaks = 1, h = h_min)
+
+# Breakpoint year and confidence interval
+bp_idx  <- bp$breakpoints[1]
+bp_year <- annual$Year[bp_idx]
+bp_ci   <- confint(bp)
+
+# Test whether breakpoint improves model fit
+fm1 <- lm(Reco_mean ~ Year * breakfactor(bp), data = annual)
+anova_bp <- anova(fm0, fm1)
+```
+

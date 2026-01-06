@@ -1,0 +1,40 @@
+---
+title: "Wood Growth"
+output: html_document
+date: "2025-12-30"
+---
+
+```{r}
+library(dplyr)
+library(janitor)
+library(broom)
+
+wood <- Bartlett_wood_growth_2005_2024 %>%
+  clean_names() %>%
+  rename(
+    Year = year,
+    Wood = wood_growth_g_c_m_2_yr_1
+  ) %>%
+  arrange(Year)
+
+# linear trend (used in manuscript), there is no trend in wood growth
+wood_lm <- lm(Wood ~ Year, data = wood)
+
+wood_trend <- tidy(wood_lm) %>%
+  filter(term == "Year") %>%
+  transmute(
+    slope = estimate,
+    se    = std.error,
+    p     = p.value
+  )
+
+# summary statistics
+wood_summary <- wood %>%
+  summarise(
+    mean = mean(Wood, na.rm = TRUE),
+    sd   = sd(Wood, na.rm = TRUE),
+    min  = min(Wood, na.rm = TRUE),
+    max  = max(Wood, na.rm = TRUE)
+  )
+```
+

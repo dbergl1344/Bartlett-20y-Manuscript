@@ -1,116 +1,105 @@
 ---
 title: "Meterological Trends"
 output: html_document
-date: "2026-01-02"
+date: "2025-12-30"
 ---
 
 ```{r}
-
 library(dplyr)
-library(knitr)
 library(broom)
-
-# Using annual_avg_final` dataset
+library(knitr)
 
 variables <- c("SWC_AverageNew", "P_1_1_1", "Tair", "TS_F_1_2_1", 
                "VPD", "CO2_mean", "PPFD_DIF_cumtotal_f", "PPFD_DIR_cumtotal_f")
 
-# Function to calculate slope and p-value
+# calculate slope, standard error, and p-value
 calculate_trend <- function(data, variable) {
   if (variable %in% names(data)) {
-    # Perform linear regression: variable ~ Year
     model <- lm(as.formula(paste(variable, "~ Year")), data = data)
-    # Extract slope and p-value from the model
     summary <- tidy(model)
-    slope <- summary$estimate[2] # Second row corresponds to the slope (Year coefficient)
-    p_value <- summary$p.value[2] # Second row corresponds to the p-value for slope
-    return(c(slope = slope, p_value = p_value))
+    slope <- summary$estimate[2]    
+    se <- summary$std.error[2]  
+    p_value <- summary$p.value[2]    
+    return(c(slope = slope, se = se, p_value = p_value))
   } else {
-    return(c(slope = NA, p_value = NA))
+    return(c(slope = NA, se = NA, p_value = NA))
   }
 }
 
-# Calculating Trends
+# running stats
 trend_results <- t(sapply(variables, calculate_trend, data = annual_avg_final))
 trend_results <- as.data.frame(trend_results)
 trend_results$Variable <- variables
+colnames(trend_results) <- c("Slope_Year", "SE", "P_value", "Variable")
 
-# Rename columns for clarity
-colnames(trend_results) <- c("Slope_Year", "P_value", "Variable")
+#  sig 
+trend_results <- trend_results %>%
+  mutate(Significance = case_when(
+    P_value < 0.001 ~ "***",
+    P_value < 0.01  ~ "**",
+    P_value < 0.05  ~ "*",
+    TRUE            ~ ""
+  ))
 
-# Merge trend results with summary statistics
-summary_stats <- annual_avg_final %>%
-  summarise(
-    SWC_Mean = mean(SWC_AverageNew, na.rm = TRUE),
-    SWC_Min = min(SWC_AverageNew, na.rm = TRUE),
-    SWC_Max = max(SWC_AverageNew, na.rm = TRUE),
-    SWC_SD = sd(SWC_AverageNew, na.rm = TRUE),
-    
-    Precip_Mean = mean(P_1_1_1, na.rm = TRUE),
-    Precip_Min = min(P_1_1_1, na.rm = TRUE),
-    Precip_Max = max(P_1_1_1, na.rm = TRUE),
-    Precip_SD = sd(P_1_1_1, na.rm = TRUE),
-    
-    Tair_Mean = mean(Tair, na.rm = TRUE),
-    Tair_Min = min(Tair, na.rm = TRUE),
-    Tair_Max = max(Tair, na.rm = TRUE),
-    Tair_SD = sd(Tair, na.rm = TRUE),
-    
-    TS_Mean = mean(TS_F_1_2_1, na.rm = TRUE),
-    TS_Min = min(TS_F_1_2_1, na.rm = TRUE),
-    TS_Max = max(TS_F_1_2_1, na.rm = TRUE),
-    TS_SD = sd(TS_F_1_2_1, na.rm = TRUE),
-    
-    VPD_Mean = mean(VPD, na.rm = TRUE),
-    VPD_Min = min(VPD, na.rm = TRUE),
-    VPD_Max = max(VPD, na.rm = TRUE),
-    VPD_SD = sd(VPD, na.rm = TRUE),
-    
-    CO2_Mean = mean(CO2_mean, na.rm = TRUE),
-    CO2_Min = min(CO2_mean, na.rm = TRUE),
-    CO2_Max = max(CO2_mean, na.rm = TRUE),
-    CO2_SD = sd(CO2_mean, na.rm = TRUE),
-    
-    PPFD_diff_Mean = mean(PPFD_DIF_cumtotal_f, na.rm = TRUE),
-    PPFD_diff_Min = min(PPFD_DIF_cumtotal_f, na.rm = TRUE),
-    PPFD_diff_Max = max(PPFD_DIF_cumtotal_f, na.rm = TRUE),
-    PPFD_diff_SD = sd(PPFD_DIF_cumtotal_f, na.rm = TRUE), 
-    
-    PPFD_dir_Mean = mean(PPFD_DIR_cumtotal_f, na.rm = TRUE),
-    PPFD_dir_Min = min(PPFD_DIR_cumtotal_f, na.rm = TRUE),
-    PPFD_dir_Max = max(PPFD_DIR_cumtotal_f, na.rm = TRUE),
-    PPFD_dir_SD = sd(PPFD_DIR_cumtotal_f, na.rm = TRUE)
+# CI
+trend_results <- trend_results %>%
+  mutate(
+    CI_lower = Slope_Year - 1.96 * SE,
+    CI_upper = Slope_Year + 1.96 * SE
   )
 
-# summary statistics and trend results
-final_summary_table <- data.frame(
-  Variable = trend_results$Variable,
-  
-  Mean = c(summary_stats$SWC_Mean, summary_stats$Precip_Mean, 
-           summary_stats$Tair_Mean, summary_stats$TS_Mean, 
-           summary_stats$VPD_Mean, summary_stats$CO2_Mean, 
-           summary_stats$PPFD_diff_Mean, summary_stats$PPFD_dir_Mean),
-  
-  Min = c(summary_stats$SWC_Min, summary_stats$Precip_Min, 
-          summary_stats$Tair_Min, summary_stats$TS_Min, 
-          summary_stats$VPD_Min, summary_stats$CO2_Min, 
-          summary_stats$PPFD_diff_Min, summary_stats$PPFD_dir_Min),
-  
-  Max = c(summary_stats$SWC_Max, summary_stats$Precip_Max, 
-          summary_stats$Tair_Max, summary_stats$TS_Max, 
-          summary_stats$VPD_Max, summary_stats$CO2_Max, 
-          summary_stats$PPFD_diff_Max, summary_stats$PPFD_dir_Max),
-  
-  SD = c(summary_stats$SWC_SD, summary_stats$Precip_SD, 
-         summary_stats$Tair_SD, summary_stats$TS_SD, 
-         summary_stats$VPD_SD, summary_stats$CO2_SD, 
-         summary_stats$PPFD_diff_SD, summary_stats$PPFD_dir_SD),
-  
-  Slope_Year = trend_results$Slope_Year,
-  P_value = trend_results$P_value
+# results
+kable(trend_results, format = "pipe", digits = 4, align = 'c', 
+      caption = "Annual Trends in Meteorological Variables (± SE and Significance)")
+
+```
+
+
+Checking MK for robustness. This script performs non-parametric Mann–Kendall trend tests and Sen’s slope estimates as a robustness check. Linear regression results (slopes ± SE, p-values) are reported in the manuscript.
+```{r}
+library(Kendall)
+library(trend)
+
+mk_variables <- c(
+  "SWC_AverageNew",
+  "P_1_1_1",
+  "Tair",
+  "TS_F_1_2_1",
+  "VPD",
+  "PPFD_DIF_cumtotal_f",
+  "PPFD_DIR_cumtotal_f"
 )
 
-kable(final_summary_table, format = "pipe", digits = 4, align = 'c', 
-      caption = "Summary of Meteorological Variables with Variability and Trends")
+# mk and sens slope function
+run_mk_test <- function(data, var) {
+  
+  y <- data[[var]]
+  x <- data$Year
+  if (all(is.na(y)) || length(unique(y[!is.na(y)])) < 3) {
+    return(tibble(
+      Variable    = var,
+      MK_Tau      = NA_real_,
+      MK_Pvalue   = NA_real_,
+      Sen_Slope   = NA_real_
+    ))
+  }
+  
+  mk  <- MannKendall(y)
+  sen <- sens.slope(y, x)
+  
+  tibble(
+    Variable  = var,
+    MK_Tau    = mk$tau[1],
+    MK_Pvalue = mk$sl[1],
+    Sen_Slope = sen$estimates[1]
+  )
+}
+
+mk_results <- bind_rows(
+  lapply(mk_variables, run_mk_test, data = annual_avg_final)
+)
+
+mk_results
+```
 
 

@@ -4,57 +4,21 @@ output: html_document
 date: "2025-12-30"
 ---
 
-# Interpolate missing SWC data.
-```{r}
-library(dplyr)
-library(zoo)  # For gap filling
-
-# Define function for gap filling using linear interpolation
-gap_fill_linear <- function(x) {
-  na.approx(x, na.rm = FALSE)  # Linear interpolation
-}
-
-# Apply gap filling to SWC columns and create new columns
-swc_columns <- c("SWC_1_1_1", "SWC_2_1_1", "SWC_3_1_1", "SWC_4_1_1")
-
-# Create new column names for the gap-filled versions
-new_swc_columns <- paste0(swc_columns, "_filled")
-
-# Gap-fill the SWC columns and assign to new columns using linear interpolation
-NewBart.df[new_swc_columns] <- lapply(NewBart.df[swc_columns], gap_fill_linear)
-
-# Check the range of the new SWC values after gap filling
-after_range <- sapply(NewBart.df[new_swc_columns], function(x) c(min(x, na.rm = TRUE), max(x, na.rm = TRUE)))
-
-# Print the range of SWC values after gap filling
-print("Range of SWC values after gap filling:")
-print(after_range)
-
-# Create the average SWC after interpolation from the new filled columns
-NewBart.df$SWC_AverageNew <- rowMeans(NewBart.df[new_swc_columns], na.rm = TRUE)
-
-# Check if there are any NAs in the new SWC_Average
-
-print(sum(is.na(NewBart.df$SWC_AverageNew)))
-```
-
-
-
 # Daily data aggregation
 ```{r}
-# Load necessary libraries
+NewBart.df <- Bartlett30MinuteFluxData
 library(dplyr)
-library(lubridate) # For date manipulation, if needed to convert things into POSIX
+library(lubridate) 
 
-# Define correction factors
+# correction factors across different timescales
 MolarMass <- 12.01
 SecondsPerHalfHour <- 1800
 SecondsPerDay <- 3600 * 24
 SecondsPerWeek <- SecondsPerDay * 7
-SecondsPerMonth <- SecondsPerDay * 30.4375  # Approximate value for an average month
+SecondsPerMonth <- SecondsPerDay * 30.4375 
 SecondsPerYear <- SecondsPerDay * 365.25
 
-# Calculate daily averages and apply correction
+# daily averages
 daily_avg <- NewBart.df %>%
   mutate(Date = as.Date(DateTime)) %>%
   group_by(Date) %>%
@@ -71,43 +35,11 @@ daily_avg <- NewBart.df %>%
     CO2_mean = mean(CO2_1_1_1, na.rm = TRUE), 
     P_1_1_1 = sum(P_1_1_1, na.rm = TRUE)
   )
-
-# Ensure the data is sorted properly before calculating lags
-daily_avg <- daily_avg %>%
-  arrange(Date)
-
-# Define lagged variables with correct lag lengths (assuming daily data)
-daily_avg <- daily_avg %>%
-  mutate(
-    # Lagged variables for 1 month (30 days)
-    lagged_SWC_1m = lag(SWC_AverageNew, 30),
-    lagged_Tair_1m = lag(Tair, 30),
-    lagged_SoilTemp_1m = lag(TS_F_1_2_1, 30),
-
-    # Lagged variables for 2 months (60 days)
-    lagged_SWC_2m = lag(SWC_AverageNew, 60),
-    lagged_Tair_2m = lag(Tair, 60),
-    lagged_SoilTemp_2m = lag(TS_F_1_2_1, 60)
-  )
-
-# Calculate min and max values for key variables (daily data)
-daily_avg <- daily_avg %>%
-  group_by(Date) %>%
-  mutate(
-    Tmin_TS = min(TS_F_1_2_1, na.rm = TRUE),
-    Tmax_TS = max(TS_F_1_2_1, na.rm = TRUE),
-    Tmin_Tair = min(Tair, na.rm = TRUE),
-    Tmax_Tair = max(Tair, na.rm = TRUE),
-    max_VPD = max(VPD, na.rm = TRUE)
-  ) %>%
-  ungroup()
-
 ```
+
 
 # Weekly aggregate
 ```{r}
-library(lubridate)
-# Calculate weekly averages
 weekly_avg <- NewBart.df %>%
   mutate(Week = week(DateTime), Year = year(DateTime)) %>%
   group_by(Year, Week) %>%
@@ -128,9 +60,7 @@ weekly_avg <- NewBart.df %>%
 
 
 # Monthly aggregate
-
 ```{r}
-library(ggplot2)
 monthly_avg <- NewBart.df %>%
   mutate(Month = month(DateTime), Year = year(DateTime)) %>%
   group_by(Year, Month) %>%
@@ -152,7 +82,6 @@ monthly_avg <- NewBart.df %>%
 
 # Yearly aggregate
 ```{r}
-# Calculate annual averages
 annual_avg_final <- NewBart.df %>%
   mutate(Year = year(DateTime)) %>%
   group_by(Year) %>%
@@ -174,9 +103,8 @@ annual_avg_final <- NewBart.df %>%
 
 
 
-# Annual Averages with the different friction velocities
+# Annual Averages Across U05, U50 and U95
 ```{r}
-# Calculate annual averages
 annual_avg_finalUstars <- NewBart.df %>%
   mutate(Year = year(DateTime)) %>%
   group_by(Year) %>%

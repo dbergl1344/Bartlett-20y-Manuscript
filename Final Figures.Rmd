@@ -1,0 +1,812 @@
+---
+title: "Final Figures"
+output: html_document
+date: "2025-12-30"
+---
+
+# Libraries 
+```{r}
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(patchwork)
+library(patchwork)
+library(grid)
+library(gridExtra)
+library(relaimpo)
+```
+
+
+# Fig. 1
+```{r}
+# stats formatting
+fmt_p <- function(p) {
+  if (is.na(p)) return("= NA")
+  if (p < 0.001) return("< 0.001")
+  if (p < 0.01)  return("< 0.01")
+  if (p < 0.05)  return("< 0.05")
+  paste0("= ", format(round(p, 2), nsmall = 2))
+}
+label_rp <- function(r, p) paste0("r = ", format(round(r, 2), nsmall = 2), ", p ", fmt_p(p))
+
+xy_limits <- function(x, y, pad_frac = 0.01) {
+  rng <- range(c(x, y), na.rm = TRUE)
+  pad <- max(1e-9, diff(rng) * pad_frac)
+  c(rng[1] - pad, rng[2] + pad)
+}
+
+spring_data$Dataset <- factor(spring_data$Dataset,
+                              levels = c("GPP Spring Dates", "Phenocam Spring Dates"),
+                              labels = c("GPP Dates", "PhenoCam Dates"))
+
+autumn_data$Dataset <- factor(autumn_data$Dataset,
+                              levels = c("GPP Autumn Dates", "Phenocam Autumn Dates"),
+                              labels = c("GPP Dates", "PhenoCam Dates"))
+
+spring_colors <- c("GPP Dates" = "#0077BB", "PhenoCam Dates" = "#CC3311")
+autumn_colors <- c("GPP Dates" = "#0077BB", "PhenoCam Dates" = "#CC3311")
+
+x_annotate <- function(x) min(x) + 0.05 * (max(x) - min(x))
+y_annotate <- function(y) min(y) + 0.85 * (max(y) - min(y))
+
+spring_ct <- cor.test(spring_matched$SOS25, spring_matched$doy_25)
+autumn_ct <- cor.test(autumn_matched$EOS25, autumn_matched$doy_25)
+spring_r <- unname(spring_ct$estimate); spring_p <- spring_ct$p.value
+autumn_r <- unname(autumn_ct$estimate); autumn_p <- autumn_ct$p.value
+
+spring_mod <- lmodel2(doy_25 ~ SOS25, data = spring_matched, range.y = "interval", range.x = "interval", nperm = 0)
+autumn_mod <- lmodel2(doy_25 ~ EOS25, data = autumn_matched, range.y = "interval", range.x = "interval", nperm = 0)
+spring_rma_slope <- spring_mod$regression.results[4, "Slope"]
+spring_rma_intercept <- spring_mod$regression.results[4, "Intercept"]
+autumn_rma_slope <- autumn_mod$regression.results[4, "Slope"]
+autumn_rma_intercept <- autumn_mod$regression.results[4, "Intercept"]
+
+spring_x_annotate <- x_annotate(spring_matched$SOS25)
+spring_y_annotate_label <- y_annotate(spring_matched$doy_25)
+autumn_x_annotate <- x_annotate(autumn_matched$EOS25)
+autumn_y_annotate_label <- y_annotate(autumn_matched$doy_25)
+
+# plot theme
+custom_theme <- theme_minimal(base_size = 16, base_family = "Helvetica") +
+  theme(
+    panel.border = element_rect(color = "black", fill = NA, linewidth = 1.2),
+    panel.grid = element_blank(),
+    axis.text = element_text(color = "black", size = 14),
+    axis.title.x = element_text(color = "black", size = 16),
+    axis.title.y = element_text(color = "black", size = 16),
+    axis.ticks = element_line(color = "black"),
+    axis.ticks.length = unit(0.25, "cm"),
+    legend.title = element_blank(),
+    legend.text = element_text(size = 14),
+    plot.margin = margin(10, 15, 10, 15)
+  )
+
+
+# spring plot
+spring_plot <- ggplot(spring_data, aes(x = Year, y = DOY, color = Dataset, shape = Dataset)) +
+  geom_line(aes(group = Dataset), linewidth = 0.9, alpha = 0.65) +
+  geom_point(size = 4) +
+  # PhenoCam linear trend (separate data; don't inherit aesthetics)
+  geom_smooth(
+    data = risingGccmeantransitiondates,
+    aes(x = year_25, y = doy_25),
+    method = "lm", se = FALSE, linetype = "dashed",
+    color = spring_colors["PhenoCam Dates"], linewidth = 1, inherit.aes = FALSE
+  ) +
+  scale_color_manual(values = spring_colors) +
+  scale_shape_manual(values = c(17, 16)) +
+  scale_y_continuous(breaks = seq(116, 146, by = 10), limits = c(116, 147)) +
+  coord_cartesian(xlim = c(min(spring_data$Year), max(spring_data$Year))) +
+  labs(y = "Spring DOY", x = NULL) +
+  annotate("text", x = min(spring_data$Year) + 0.3, y = 146,
+           label = "A", fontface = "bold", size = 7, hjust = 0) +
+  custom_theme +
+  theme(legend.position = c(0.03, 0.92),
+        legend.justification = c(0, 1))
+
+# autumn plot
+autumn_plot <- ggplot(autumn_data, aes(x = Year, y = DOY, color = Dataset, shape = Dataset)) +
+  geom_line(aes(group = Dataset), linewidth = 0.9, alpha = 0.65) +
+  geom_point(size = 4) +
+  scale_color_manual(values = autumn_colors) +
+  scale_shape_manual(values = c(17, 16)) +
+  scale_y_continuous(breaks = seq(265, 285, by = 5), limits = c(263, 286)) +
+  coord_cartesian(xlim = c(min(autumn_data$Year), max(autumn_data$Year))) +
+  labs(y = "Autumn DOY", x = "Year") +
+  annotate("text", x = min(autumn_data$Year) + 0.3, y = 285,
+           label = "B", fontface = "bold", size = 7, hjust = 0) +
+  custom_theme +
+  theme(legend.position = "none")   # keep one legend (from A)
+
+# spring scatter
+spring_lims <- xy_limits(spring_matched$SOS25, spring_matched$doy_25)
+
+spring_scatter <- ggplot(spring_matched, aes(x = SOS25, y = doy_25)) +
+  geom_point(size = 4, color = spring_colors["GPP Dates"]) +
+  # 1:1 reference
+  geom_abline(intercept = 0, slope = 1,
+              color = "grey60", linetype = "dashed", linewidth = 0.6) +
+  # RMA line
+  geom_abline(intercept = spring_rma_intercept, slope = spring_rma_slope,
+              color = spring_colors["GPP Dates"], linewidth = 1.2) +
+  coord_fixed(ratio = 1, xlim = spring_lims, ylim = spring_lims) +
+  labs(x = "GPP Spring DOY", y = "PhenoCam Spring DOY") +
+  annotate("text", x = spring_x_annotate - 1, y = spring_y_annotate_label + 4,
+           label = label_rp(spring_r, spring_p), size = 5,
+           hjust = 0.62, vjust = 1.8, family = "Helvetica") +
+  annotate("text",
+           x = spring_lims[1] + 0.02 * diff(spring_lims),
+           y = spring_lims[2] - 0.04 * diff(spring_lims),
+           label = "C", fontface = "bold", size = 7,
+           hjust = 0, family = "Helvetica") +
+  custom_theme
+
+# autumn scatter
+autumn_lims <- xy_limits(autumn_matched$EOS25, autumn_matched$doy_25)
+
+autumn_scatter <- ggplot(autumn_matched, aes(x = EOS25, y = doy_25)) +
+  geom_point(size = 4, color = autumn_colors["GPP Dates"]) +
+  geom_abline(intercept = 0, slope = 1,
+              color = "grey60", linetype = "dashed", linewidth = 0.6) +
+  geom_abline(intercept = autumn_rma_intercept, slope = autumn_rma_slope,
+              color = autumn_colors["GPP Dates"], linewidth = 1.2) +
+  coord_fixed(ratio = 1, xlim = autumn_lims, ylim = autumn_lims) +
+  labs(x = "GPP Autumn DOY", y = "PhenoCam Autumn DOY") +
+  annotate("text", x = autumn_x_annotate - 2 , y = autumn_y_annotate_label + 6,
+           label = label_rp(autumn_r, autumn_p), size = 5,
+           hjust = 1.2, vjust = 2.1, family = "Helvetica") +
+  annotate("text",
+           x = autumn_lims[1] + 0.02 * diff(autumn_lims),
+           y = autumn_lims[2] - 0.04 * diff(autumn_lims),
+           label = "D", fontface = "bold", size = 7,
+           hjust = 0, family = "Helvetica") +
+  custom_theme
+
+
+spring_plot <- spring_plot +
+  theme(legend.position = c(0.03, 0.92),
+        legend.justification = c(0, 1),
+        aspect.ratio = 1)  # <- add this
+
+autumn_plot <- autumn_plot +
+  theme(legend.position = "none",
+        aspect.ratio = 1)  # <- add this
+```
+
+
+Fig 2. 
+```{r}
+custom_theme <- theme_minimal(base_size = 16) +
+  theme(
+    panel.border = element_rect(color = "black", fill = NA, linewidth = 1),
+    panel.grid = element_blank(),
+    axis.text = element_text(color = "black", size = 14),
+    axis.title = element_text(color = "black", size = 16),
+    axis.ticks = element_line(color = "black"),
+    axis.ticks.length = unit(0.25, "cm"),
+    plot.margin = margin(10, 15, 10, 15)
+  )
+
+
+fmt_p <- function(p) {
+  if (is.na(p)) return("= NA")
+  if (p < 0.001) return("< 0.001")
+  if (p < 0.01)  return("< 0.01")
+  if (p < 0.05)  return("< 0.05")
+  paste0("= ", format(round(p, 2), nsmall = 2))
+}
+
+label_rp <- function(r, p) {
+  paste0("r = ", format(round(r, 2), nsmall = 2), ", p ", fmt_p(p))
+}
+
+
+seasonal_gpp <- monthly_avg %>%
+  mutate(
+    season = case_when(
+      Month == 5 ~ "spring",    
+      Month %in% c(9, 10) ~ "autumn",  
+      Month %in% 5:10 ~ "gsl_window", 
+      TRUE ~ "other"
+    )
+  ) %>%
+  group_by(Year, season) %>%
+  summarise(GPP = mean(GPP_mean, na.rm = TRUE), .groups = "drop") %>%
+  pivot_wider(names_from = season, values_from = GPP)
+
+flux_pheno_seasonal <- flux_gpp_pheno %>%
+  left_join(seasonal_gpp, by = "Year")
+
+
+make_phenology_plotSeasonal <- function(df, x_var, y_var, x_label, panel_label,
+                                        show_y_axis = TRUE,
+                                        r_y_frac = -0.07,
+                                        slope_y_frac = 0.05,
+                                        x_right_frac = 0.02) {
+  
+  ct <- cor.test(df[[x_var]], df[[y_var]])
+  r_val <- as.numeric(ct$estimate)
+  r_lab <- label_rp(r_val, ct$p.value)
+  
+  lm_model <- lm(as.formula(paste0(y_var, " ~ ", x_var)), data = df)
+  slope <- coef(lm_model)[2]
+  slope_se <- summary(lm_model)$coefficients[2, 2]
+  
+  slope_lab <- paste0("slope = ", round(slope, 2), " \u00B1 ", round(slope_se, 2))
+  
+  x_min <- min(df[[x_var]], na.rm = TRUE); x_max <- max(df[[x_var]], na.rm = TRUE)
+  y_min <- min(df[[y_var]], na.rm = TRUE); y_max <- max(df[[y_var]], na.rm = TRUE)
+  
+  xr <- x_max - x_min; yr <- y_max - y_min
+  
+  x_right <- x_max - x_right_frac * xr
+  y_r     <- y_max + r_y_frac * yr
+  y_slope <- y_max + slope_y_frac * yr
+  x_left  <- x_min + x_right_frac * xr
+  
+  y_lab <- if (show_y_axis) {
+    expression("GPP Anomaly (g C m"^{-2}~yr^{-1}*")")
+  } else NULL
+  
+  y_axis_elements <- if (show_y_axis) theme() else
+    theme(axis.title.y = element_blank(),
+          axis.text.y = element_blank(),
+          axis.ticks.y = element_blank())
+  
+  ggplot(df, aes(x = .data[[x_var]], y = .data[[y_var]])) +
+    geom_point(size = 3, color = "darkgreen") +
+    geom_smooth(method = "lm", se = TRUE,
+                fill = "forestgreen", color = "darkgreen",
+                alpha = 0.2, linewidth = 1) +
+    annotate("text", x = x_right, y = y_r, label = r_lab,
+             hjust = 1, vjust = 0, size = 5) +
+    annotate("text", x = x_right, y = y_slope, label = slope_lab,
+             hjust = 1, vjust = 0, size = 5) +
+    annotate("text",
+         x = -Inf, y = Inf,
+         label = panel_label,
+         hjust = -0.5, vjust = 1.5,
+         size = 7, fontface = "bold") +
+    labs(x = x_label, y = y_lab) +
+    custom_theme +
+    y_axis_elements
+}
+
+
+
+p_sosSeasonal <- make_phenology_plotSeasonal(flux_pheno_seasonal, "SOS25", "spring",
+                             "Start of Season (DOY)", "A", show_y_axis = TRUE)
+
+p_eosSeasonal <- make_phenology_plotSeasonal(flux_pheno_seasonal, "EOS25", "autumn",
+                             "End of Season (DOY)", "B", show_y_axis = TRUE)
+
+p_gslSeasonal <- make_phenology_plotSeasonal(flux_pheno_seasonal, "gsl_window", "GPP_anom",
+                             "Growing Season Length (days)", "C", show_y_axis = TRUE)
+
+
+p_sosSeasonal <- make_phenology_plotSeasonal(
+  flux_pheno_seasonal, "SOS25", "spring",
+  "Start of Season (DOY)", "A", show_y_axis = TRUE
+)
+
+p_eosSeasonal <- make_phenology_plotSeasonal(
+  flux_pheno_seasonal, "EOS25", "autumn",
+  "End of Season (DOY)", "B", show_y_axis = TRUE
+)
+
+p_gslSeasonal <- make_phenology_plotSeasonal(
+  flux_pheno_seasonal, "GSL", "GPP_anom",
+  "Growing Season Length (days)", "C", show_y_axis = TRUE
+)
+
+
+
+final_phenology_plot <- p_sosSeasonal + p_eosSeasonal + p_gslSeasonal +
+  plot_layout(ncol = 3)
+
+print(final_phenology_plot)
+```
+
+
+Fig 3. 
+```{r}
+format_p <- function(p) {
+  if (p < 0.001) {
+    return("p < 0.001")
+  } else {
+    return(paste0("p = ", formatC(p, format = "f", digits = 3)))
+  }
+}
+
+# trends for figure
+nep_lm <- lm(NEP_mean ~ Year, data = annual_avg_finalUstars)
+reco_lm <- lm(Reco_mean ~ Year, data = annual_avg_finalUstars)
+gpp_lm <- lm(GPP_mean ~ Year, data = annual_avg_finalUstars)
+
+nep_slope <- coef(summary(nep_lm))[2, 1]
+nep_se <- coef(summary(nep_lm))[2, 2]
+nep_p <- coef(summary(nep_lm))[2, 4]
+
+reco_slope <- coef(summary(reco_lm))[2, 1]
+reco_se <- coef(summary(reco_lm))[2, 2]
+reco_p <- coef(summary(reco_lm))[2, 4]
+
+gpp_slope <- coef(summary(gpp_lm))[2, 1]
+gpp_se <- coef(summary(gpp_lm))[2, 2]
+gpp_p <- coef(summary(gpp_lm))[2, 4]
+
+# plotting theme
+custom_theme_flux <- theme_minimal(base_size = 16, base_family = "Helvetica") +
+  theme(
+    panel.grid = element_blank(),
+    panel.border = element_rect(color = "black", fill = NA, linewidth = 1.2),
+    axis.text = element_text(size = 14, color = "black"),
+    axis.title = element_text(size = 16, face = "plain", color = "black"),
+    axis.ticks = element_line(color = "black"),
+    axis.ticks.length = unit(0.25, "cm"),
+    plot.margin = margin(10, 10, 10, 10)
+  )
+
+# figure tidiness
+xlims   <- c(2004, 2023.5)
+xbreaks <- seq(2004, 2023, by = 5)
+ymin_ribbon <- min(annual_avg_finalUstars$NEPU05_adj, na.rm = TRUE)
+ymax_ribbon <- max(annual_avg_finalUstars$NEPU95_adj, na.rm = TRUE)
+ypad        <- 10
+ylim_a      <- c(ymin_ribbon - ypad, ymax_ribbon + ypad)
+ystat_a <- ylim_a[1] + 0.05 * diff(ylim_a)
+
+
+panel_a <- ggplot() +
+  geom_ribbon(
+    data = annual_avg_finalUstars,
+    aes(x = Year, ymin = NEP_mean - 50, ymax = NEP_mean + 50),
+    fill = "gray40", alpha = 0.35
+  ) +
+  geom_line(
+    data = annual_avg_finalUstars,
+    aes(x = Year, y = NEP_mean, color = "NEP"), size = 1.2
+  ) +
+  geom_point(
+    data = annual_avg_finalUstars,
+    aes(x = Year, y = NEP_mean, color = "NEP"), size = 3
+  ) +
+  geom_smooth(
+    data = annual_avg_finalUstars,
+    aes(x = Year, y = NEP_mean),
+    method = "lm", se = TRUE,
+    color = "gray40", fill = "gray40",
+    alpha = 0.1, linetype = "dashed", size = 1
+  ) +
+  
+geom_ribbon(
+  data = Wood_growth_with_uncertainty_for_Darby |>
+    filter(!is.na(SurvC_q025), Year <= 2023),
+  aes(x = Year, ymin = SurvC_q025, ymax = SurvC_q975),
+  fill = "#6B8E23", alpha = 0.45
+) +
+  
+geom_line(
+  data = Wood_growth_with_uncertainty_for_Darby |>
+    filter(!is.na(SurvC_q500), Year <= 2023),
+  aes(x = Year, y = SurvC_q500, color = "Wood growth"),
+  size = 1.2
+) +
+geom_point(
+  data = Wood_growth_with_uncertainty_for_Darby |>
+    filter(!is.na(SurvC_q500), Year <= 2023),
+  aes(x = Year, y = SurvC_q500, color = "Wood growth"),
+  size = 2.5
+) +
+  
+  geom_text(aes(x = xlims[1], y = Inf, label = "A"),
+            inherit.aes = FALSE, hjust = -0.25, vjust = 1.4,
+            fontface = "bold", family = "Helvetica", size = 6) +
+
+  annotate("text", x = 2006, y = 385,
+           label = paste0("NEP slope = ", round(nep_slope, 2),
+                          " ± ", round(nep_se, 2), ", ", format_p(nep_p)),
+           size = 5, hjust = 0, family = "Helvetica") +
+
+  scale_y_continuous(
+    name = expression(NEP~(g~C~m^{-2}~yr^{-1})),
+    sec.axis = dup_axis(name = expression(Wood~growth~(g~C~m^{-2}~yr^{-1})))
+  ) +
+  scale_x_continuous(limits = xlims, breaks = xbreaks,
+                     expand = expansion(mult = c(0, 0))) +
+  
+  scale_color_manual(
+    values = c(
+      "NEP" = "gray40",
+      "Wood growth" = "#6B8E23"
+    )
+  ) +
+  guides(color = guide_legend(title = NULL)) +
+  
+  labs(x = NULL) +
+  custom_theme_flux +
+  theme(
+    legend.position = c(0.85, 0.05),
+    legend.justification = c("right", "bottom"),
+    legend.direction = "horizontal",
+    legend.background = element_blank(),
+    legend.text = element_text(size = 14, family = "Helvetica"),
+    legend.key = element_blank()
+  ) +
+  
+  coord_cartesian(ylim = ylim_a)
+
+
+panel_b <- ggplot(annual_avg_finalUstars) +
+  geom_ribbon(aes(x = Year, ymin = GPP_mean - 50, ymax = GPP_mean +50),
+              fill = "#0077BB", alpha = 0.5) +
+  geom_ribbon(aes(x = Year, ymin = Reco_mean - 50, ymax = Reco_mean + 50),
+              fill = "#CC3311", alpha = 0.5) +
+  geom_line(aes(x = Year, y = GPP_mean, color = "GPP"), size = 1.2) +
+  geom_line(aes(x = Year, y = Reco_mean, color = "Reco"), size = 1.2) +
+  geom_point(aes(x = Year, y = GPP_mean, color = "GPP"), size = 3) +
+  geom_point(aes(x = Year, y = Reco_mean, color = "Reco"), size = 3) +
+  geom_smooth(aes(x = Year, y = GPP_mean), method = "lm", se = TRUE,
+              color = "#0077BB", fill = "#0077BB", alpha = 0.1,
+              linetype = "dashed", size = 1) +
+  geom_smooth(aes(x = Year, y = Reco_mean), method = "lm", se = TRUE,
+              color = "#CC3311", fill = "#CC3311", alpha = 0.1,
+              linetype = "dashed", size = 1) +
+
+  geom_text(aes(x = xlims[1], y = Inf, label = "B"),
+            inherit.aes = FALSE, hjust = -0.25, vjust = 1.4,
+            fontface = "bold", family = "Helvetica", size = 6) +
+
+  annotate("text", x = 2006, y = 1300,
+           label = paste0("Reco slope = ", round(reco_slope, 2),
+                          " ± ", round(reco_se, 2), ", ", format_p(reco_p)),
+           size = 5, hjust = 0, family = "Helvetica") +
+  annotate("text", x = 2006, y = 1255,
+           label = paste0("GPP slope = ", round(gpp_slope, 2),
+                          " ± ", round(gpp_se, 2), ", ", format_p(gpp_p)),
+           size = 5, hjust = 0, family = "Helvetica") +
+
+  scale_y_continuous(name = expression(Component~Fluxes~(g~C~m^{-2}~yr^{-1}))) +
+  scale_x_continuous(limits = xlims, breaks = xbreaks, expand = expansion(mult = c(0, 0))) +
+  scale_color_manual(values = c("GPP" = "#0077BB", "Reco" = "#CC3311")) +
+  guides(color = guide_legend(title = NULL)) +
+  labs(x = "Year") +
+custom_theme +
+theme(
+  legend.position = c(0.85, 0.05),
+  legend.justification = c("right", "bottom"),
+  legend.direction = "horizontal",
+  legend.background = element_blank(),
+  legend.text = element_text(size = 14, family = "Helvetica"),
+  legend.key = element_blank()
+)
+
+
+plot_grid(panel_a, panel_b, ncol = 1, align = "v", axis = "lr", rel_heights = c(1, 1))
+```
+
+
+Fig 4. 
+```{r}
+# correlations
+cor_test <- cor.test(
+  winter_climate_flux$Winter_Reco_Anom,
+  -winter_climate_flux$NEE_anom.y,
+  method = "pearson"
+)
+
+r_value <- round(cor_test$estimate, 2)
+p_value <- ifelse(cor_test$p.value < 0.001, "< 0.001", signif(cor_test$p.value, 2))
+
+# linear model for slope +/- SE
+lm_fit <- lm(-NEE_anom.y ~ Winter_Reco_Anom, data = winter_climate_flux)
+
+slope_val <- coef(summary(lm_fit))[2, 1]
+se_val    <- coef(summary(lm_fit))[2, 2]
+
+# rounding
+slope_round <- round(slope_val, 2)
+se_round    <- round(se_val, 2)
+
+slope_label <- paste0(
+  "slope = ",
+  sprintf("%.2f", slope_val),
+  " \u00B1 ",
+  sprintf("%.2f", se_val)
+)
+
+
+winter_plot_final <- ggplot(
+  winter_climate_flux,
+  aes(
+    x = Winter_Reco_Anom,
+    y = -NEE_anom.y,
+    fill = winter_severity_index
+  )
+) +
+  geom_abline(
+    intercept = 0, slope = -1,
+    linetype = "dashed",
+    color = "#7A7A5A",   # warm neutral
+    linewidth = 1
+  ) +
+  geom_smooth(
+    method = "lm", se = TRUE,
+    color = "#5C5C5C",
+    fill  = "#5C5C5C",
+    alpha = 0.30,
+    linewidth = 1
+  ) +
+  geom_point(
+    shape = 21,
+    size = 4.2,
+    stroke = 1.0,
+    color = "black"
+  ) +
+
+  scale_fill_gradient2(
+    low = "#084594",
+    mid = "#F5F4D2",
+    high = "#a50f15",
+    midpoint = 0,
+    breaks = seq(-4, 4, by = 2),
+    limits = c(-4, 4),
+    oob = scales::squish,
+    name = "Winter Severity Index",
+    guide = guide_colorbar(
+      direction = "vertical",
+      barheight = unit(4, "cm"),
+      barwidth  = unit(0.6, "cm"),
+      title.position = "top",
+      title.hjust = 0.5
+    )
+  ) +
+
+annotate(
+  "text",
+  x = 60, y = 200,
+  label = paste0(
+    "r = ", r_value, "\n",
+    "p ", p_value, "\n",
+    slope_label
+  ),
+  hjust = 0,
+  vjust = 1,
+  size = 5,
+  family = "Helvetica"
+) +
+
+  labs(
+    x = expression("Winter Respiration Anomaly (g C m"^{-2}*")"),
+    y = expression("Annual NEP Anomaly (g C m"^{-2}*")")
+  ) +
+
+  xlim(-300, 300) +
+  ylim(-300, 300) +
+  coord_fixed(ratio = 1) +
+
+  theme_minimal(base_family = "Helvetica", base_size = 16) +
+  theme(
+    panel.grid = element_blank(),
+    panel.border = element_rect(color = "black", fill = NA, linewidth = 1.2),
+    axis.text = element_text(size = 14, color = "black"),
+    axis.title = element_text(size = 16, color = "black"),
+    axis.ticks = element_line(color = "black"),
+    axis.ticks.length = unit(0.25, "cm"),
+
+    legend.position = c(0.22, 0.27),
+    legend.title = element_text(size = 12),
+    legend.text  = element_text(size = 10),
+
+    legend.background = element_blank(),
+    legend.key = element_blank(),
+    plot.margin = margin(10, 15, 10, 15)
+  )
+
+print(winter_plot_final)
+```
+
+
+Fig 5.
+```{r}
+gray_palette <- rep("gray30", 7)
+
+final_fig5_anomsFluxesPcs <- ggplot(plot_data_long, aes(x = Year, y = Value, fill = Variable)) +
+  geom_blank(data = pc_limits_data) +
+  geom_col(width = 0.65, color = "black", linewidth = 0.25) +
+  geom_hline(yintercept = 0, color = "black", linewidth = 0.4) +
+  facet_wrap(~ Variable, ncol = 1, scales = "free_y", strip.position = "left") +
+  scale_fill_manual(values = gray_palette) +
+  scale_x_continuous(
+    breaks = seq(2003, 2023, by = 5),
+    expand = expansion(mult = c(0, 0.01))
+  ) +
+
+  # plotting theme
+  theme_classic(base_family = "Helvetica", base_size = 18) +
+  theme(
+    aspect.ratio = 0.25,                    # <- Wide panels, short height
+    panel.grid = element_blank(),
+    panel.border = element_rect(color = "black", fill = NA, linewidth = 0.4),
+    axis.title.y = element_blank(),
+    axis.title.x = element_text(size = 16, family = "Helvetica", color = "black", margin = margin(t = 8)),
+    axis.text.x = element_text(size = 14, family = "Helvetica", color = "black"),
+    axis.text.y = element_text(size = 14, family = "Helvetica", color = "black"),
+    strip.background = element_blank(),
+    strip.text = element_blank(),
+    axis.ticks = element_line(color = "black", linewidth = 0.3),
+    axis.ticks.length = unit(0.15, "cm"),
+    panel.spacing.y = unit(0.5, "lines"),   # tighter stacking
+    plot.margin = margin(8, 10, 8, 25),
+    legend.position = "none"
+  ) +
+  labs(x = "Year", y = NULL) +
+
+  # panel labels
+  geom_text(
+    data = plot_data_long %>%
+      group_by(Variable, Panel) %>%
+      slice(1) %>%
+      ungroup(),
+    aes(x = 2003.2, y = Inf, label = Panel),
+    inherit.aes = FALSE,
+    hjust = 0, vjust = 1.2, size = 5.5,
+    family = "Helvetica", fontface = "bold"
+  ) +
+  coord_cartesian(xlim = c(2003, 2023.5))
+
+print(final_fig5_anomsFluxesPcs)
+```
+
+
+Fig. 6
+```{r}
+flux_group <- function(x) {
+  cut(x,
+      breaks = quantile(x, probs = c(0, 1/3, 2/3, 1), na.rm = TRUE),
+      labels = c("Low", "Medium", "High"),
+      include.lowest = TRUE)
+}
+
+flux_pca_monthly <- flux_pca_monthly %>%
+  mutate(
+    NEP = -NEE,
+    Reco_group = flux_group(Reco),
+    GPP_group  = flux_group(GPP),
+    NEP_group  = flux_group(NEP)
+  )
+
+group_colors <- c("Low" = "gray40", "Medium" = "#3182BD", "High" ="#DE2D26")
+group_shapes <- c("Low" = 16, "Medium" = 17, "High" = 15)
+
+color_nep  <- "gray40"
+color_gpp  <- "#3182BD"
+color_reco <- "#DE2D26"
+
+# plotting theme
+theme_pub <- theme_minimal(base_family = "Helvetica", base_size = 16) +
+  theme(
+    panel.grid        = element_blank(),
+    panel.border      = element_rect(color = "black", fill = NA, linewidth = 1.2),
+    axis.text         = element_text(size = 13, color = "black"),
+    axis.title        = element_text(size = 15, face = "plain", color = "black"),
+    axis.ticks        = element_line(color = "black"),
+    axis.ticks.length = unit(0.25, "cm"),
+    legend.background = element_blank(),
+    legend.key        = element_blank(),
+    plot.margin       = margin(10, 10, 10, 10)
+  )
+
+# PCA function
+plot_flux_biplot <- function(df, x, y, group_var, x_label, y_label, panel_label) {
+  ggplot(df, aes_string(x = x, y = y, color = group_var, shape = group_var)) +
+    geom_hline(yintercept = 0, linetype = "dashed", color = "gray70") +
+    geom_vline(xintercept = 0, linetype = "dashed", color = "gray70") +
+    stat_ellipse(aes(fill = !!sym(group_var)), geom = "polygon",
+                 alpha = 0.15, color = "black", linewidth = 0.6, level = 0.65) +
+    geom_point(size = 4, stroke = 0.4) +
+    scale_color_manual(values = group_colors) +
+    scale_fill_manual(values = group_colors) +
+    scale_shape_manual(values = group_shapes) +
+    labs(x = x_label, y = y_label) +
+    xlim(-6, 6) + ylim(-6, 6) +
+    annotate("text", x = -5.9, y = 5.8, label = panel_label,
+             hjust = 0, vjust = 1, size = 4.8, fontface = "bold",
+             family = "Helvetica") +
+    theme_pub +
+    theme(
+      legend.position      = "none",
+      legend.title         = element_blank()
+    )
+}
+
+# plotting
+pA <- plot_flux_biplot(flux_pca_monthly, "
+                       ", "PC2", "NEP_group",
+                       "
+                       (14%)", "PC2 (12%)", "A) NEP")
+
+pB <- plot_flux_biplot(flux_pca_monthly, "PC5", "PC6", "GPP_group",
+                       "PC5 (7%)", "PC6 (7%)", "B) GPP")
+
+pC <- plot_flux_biplot(flux_pca_monthly, "
+                       ", "PC2", "Reco_group",
+                       "
+                       (14%)", "PC2 (12%)", "C) Reco")
+
+# models, fluxes ~ PCs
+model_nep <- lm(NEP_anom ~ 
+                  PC1.y + PC2.y + winter_severity_index + PC5.y + PC6.y,
+                data = flux_mergedv2)
+model_reco <- lm(Reco_anom ~ 
+                   PC1.y + PC2.y + winter_severity_index,
+                 data = flux_mergedv2)
+model_gpp  <- lm(GPP_anom ~ PC5 + PC6, data = gpp_predictors)
+
+# predictions
+flux_mergedv2$predicted_nep_extended <- predict(model_nep, newdata = flux_mergedv2)
+flux_mergedv2$Reco_pred_combo_winter <- predict(model_reco, newdata = flux_mergedv2)
+gpp_predictors$GPP_pred <- predict(model_gpp, newdata = gpp_predictors)
+
+# RMSE helper
+rmse <- function(obs, pred) round(sqrt(mean((obs - pred)^2, na.rm = TRUE)), 1)
+
+# stats label function
+stats_label <- function(model, obs, pred) {
+  paste0("Adj. R\u00B2 = ", round(summary(model)$adj.r.squared, 2),
+         "\nRMSE = ", rmse(obs, pred))
+}
+
+# observed vs predicted panels
+pD <- ggplot(flux_mergedv2, aes(x = NEP_anom, y = predicted_nep_extended)) +
+  geom_point(size = 4, color = color_nep) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "gray40") +
+  geom_smooth(method = "lm", se = FALSE, color = color_nep, linewidth = 1) +
+  labs(x = expression(Observed~Anomaly~(gC~m^{-2}~yr^{-1})),
+       y = expression(Predicted~Anomaly~(gC~m^{-2}~yr^{-1}))) +
+  annotate("text", x = -Inf, y = Inf, label = "D) NEP",
+           hjust = -0.3, vjust = 2, size = 4.8, fontface = "bold",
+           family = "Helvetica") +
+  annotate("text", x = Inf, y = -Inf,
+           label = stats_label(model_nep, flux_mergedv2$NEP_anom,
+                               flux_mergedv2$predicted_nep_extended),
+           hjust = 1.1, vjust = -1.2, size = 5, family = "Helvetica") +
+  theme_pub
+
+pE <- ggplot(gpp_predictors, aes(x = GPP_anom, y = GPP_pred)) +
+  geom_point(size = 4, color = color_gpp) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "gray40") +
+  geom_smooth(method = "lm", se = FALSE, color = color_gpp, linewidth = 1) +
+  labs(x = expression(Observed~Anomaly~(gC~m^{-2}~yr^{-1})),
+       y = expression(Predicted~Anomaly~(gC~m^{-2}~yr^{-1}))) +
+  annotate("text", x = -Inf, y = Inf, label = "E) GPP",
+           hjust = -0.3, vjust = 2, size = 4.8, fontface = "bold",
+           family = "Helvetica") +
+  annotate("text", x = Inf, y = -Inf,
+           label = stats_label(model_gpp, gpp_predictors$GPP_anom,
+                               gpp_predictors$GPP_pred),
+           hjust = 1.1, vjust = -1.2, size = 5, family = "Helvetica") +
+  theme_pub
+
+pF <- ggplot(flux_mergedv2, aes(x = Reco_anom, y = Reco_pred_combo_winter)) +
+  geom_point(size = 4, color = color_reco) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "gray40") +
+  geom_smooth(method = "lm", se = FALSE, color = color_reco, linewidth = 1) +
+  labs(x = expression(Observed~Anomaly~(gC~m^{-2}~yr^{-1})),
+       y = expression(Predicted~Anomaly~(gC~m^{-2}~yr^{-1}))) +
+  annotate("text", x = -Inf, y = Inf, label = "F) Reco",
+           hjust = -0.3, vjust = 2, size = 4.8, fontface = "bold",
+           family = "Helvetica") +
+  annotate("text", x = Inf, y = -Inf,
+           label = stats_label(model_reco, flux_mergedv2$Reco_anom,
+                               flux_mergedv2$Reco_pred_combo_winter),
+           hjust = 1.1, vjust = -1.2, size = 5, family = "Helvetica") +
+  theme_pub
+
+final_fig <- (pA | pB | pC) / (pD | pE | pF) +
+  plot_layout(guides = "collect") &
+  theme(legend.position = "none")
+
+final_fig
+```
+

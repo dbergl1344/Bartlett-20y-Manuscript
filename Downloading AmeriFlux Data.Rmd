@@ -1,0 +1,47 @@
+---
+title: "Downloading AmeriFlux Data"
+output: html_document
+date: "2025-12-30"
+---
+```{r}
+#Gives me a list of all of the ameriflux sites.
+library(amerifluxr)
+site <-amf_site_info()
+sites.df <- data.table::as.data.table(site)
+View(sites.df)
+View(base)
+
+## Here you are downloading all of the ameriflux sites and their site names so you can navigate through that to determine what site and data you want to work with
+floc1 <- amf_download_bif(user_id = "bergld",
+                          user_email = "ddb348@nau.edu",
+                          data_policy = "CCBY4.0",
+                          agree_policy = TRUE,
+                          intended_use = "synthesis",
+                          intended_use_text = "synthesis of ecosystem fluxes",
+                          out_dir = tempdir(),
+                          verbose = TRUE,
+                          site_w_data = TRUE)
+
+bif <- amf_read_bif(file = floc1)
+
+##Here you are using the ameriflux R package to download your ameriflux data that you are working with
+floc2 <- amf_download_base(user_id = "bergld",
+                           user_email = "ddb348@nau.edu",
+                           site_id = "US-Bar",
+                           data_product = "BASE-BADM",
+                           data_policy = "CCBY4.0",
+                           agree_policy = TRUE,
+                           intended_use = "synthesis",
+                           intended_use_text = "synthesis of ecosystem fluxes",
+                           verbose = TRUE,
+                           out_dir = tempdir())
+
+## giving the data that you just brought in from amerifluxR a name and putting it into a data frame after the floc2 two data that you brought in is unzipped
+Bartlett.30.Minute.Data_04_23AmeriFlux <- amf_read_base(file = floc2,
+                                         unzip = TRUE,
+                                         parse_timestamp = TRUE)
+
+View(Bartlett.30.Minute.Data) ## This is the dataset then used for the ReddyProc Pipeline and the Liu et al., 2025 gap-filling using machine learning. First, dataset us u* filtered using ReddyProc methods, then gapfilled following Liu et al. 2025, then nighttime partitioning in ReddyProc.
+
+```
+

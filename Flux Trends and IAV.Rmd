@@ -1,0 +1,92 @@
+---
+title: "Flux Trends"
+output: html_document
+date: "2025-12-30"
+---
+
+
+```{r pressure, echo=FALSE}
+library(ggplot2)
+library(cowplot)
+library(Kendall)
+library(trend)
+
+# NEP
+mk_nep <- MannKendall(annual_avg_finalUstars$NEP_mean)
+sen_nep <- sens.slope(annual_avg_finalUstars$NEP_mean, conf.level = 0.95)
+
+# Reco
+mk_reco <- MannKendall(annual_avg_finalUstars$Reco_mean)
+sen_reco <- sens.slope(annual_avg_finalUstars$Reco_mean, conf.level = 0.95)
+
+# GPP
+mk_gpp <- MannKendall(annual_avg_finalUstars$GPP_mean)
+sen_gpp <- sens.slope(annual_avg_finalUstars$GPP_mean, conf.level = 0.95)
+
+mk_nep; sen_nep
+mk_reco; sen_reco
+mk_gpp; sen_gpp
+
+# Does not differ from linear model, linear model is sufficient. Linear model below
+```
+
+
+Linear trends and IAV 
+```{r}
+nee_trend  <- coef(lm(NEE_mean  ~ Year, data = annual_avg_final))[2]
+gpp_trend  <- coef(lm(GPP_mean  ~ Year, data = annual_avg_final))[2]
+reco_trend <- coef(lm(Reco_mean ~ Year, data = annual_avg_final))[2]
+
+cat(sprintf("NEE Trend:  %.2f g C m⁻² yr⁻¹\n", nee_trend))
+cat(sprintf("GPP Trend:  %.2f g C m⁻² yr⁻¹\n", gpp_trend))
+cat(sprintf("Reco Trend: %.2f g C m⁻² yr⁻¹\n", reco_trend))
+
+
+# IAV
+nee_iav  <- sd(annual_avg_final$NEE_mean,  na.rm = TRUE)
+gpp_iav  <- sd(annual_avg_final$GPP_mean,  na.rm = TRUE)
+reco_iav <- sd(annual_avg_final$Reco_mean, na.rm = TRUE)
+
+cat(sprintf("NEE IAV (SD):  %.2f g C m⁻² yr⁻¹\n", nee_iav))
+cat(sprintf("GPP IAV (SD):  %.2f g C m⁻² yr⁻¹\n", gpp_iav))
+cat(sprintf("Reco IAV (SD): %.2f g C m⁻² yr⁻¹\n", reco_iav))
+
+
+# anomaly correlations - what flux is driving IAV
+annual_avg_final <- annual_avg_final %>%
+  mutate(
+    NEE_anom  = NEE_mean  - mean(NEE_mean,  na.rm = TRUE),
+    GPP_anom  = GPP_mean  - mean(GPP_mean,  na.rm = TRUE),
+    Reco_anom = Reco_mean - mean(Reco_mean, na.rm = TRUE)
+  )
+
+cor_gpp  <- cor.test(annual_avg_final$GPP_anom,  annual_avg_final$NEE_anom)
+cor_reco <- cor.test(annual_avg_final$Reco_anom, annual_avg_final$NEE_anom)
+
+cat(sprintf(
+  "GPP–NEE anomaly correlation:  r = %.2f, p = %.3e\n",
+  cor_gpp$estimate, cor_gpp$p.value
+))
+
+cat(sprintf(
+  "Reco–NEE anomaly correlation: r = %.2f, p = %.3e\n",
+  cor_reco$estimate, cor_reco$p.value
+))
+
+dfanoms <- annual_anomalies_both %>%
+  mutate(NEP = -NEE)
+
+cor_reco_nep <- cor.test(dfanoms$NEP, dfanoms$Reco)
+cor_gpp_nep  <- cor.test(dfanoms$NEP, dfanoms$GPP)
+
+cat("NEP vs Reco anomalies:\n",
+    "r  =", round(cor_reco_nep$estimate, 2), "\n",
+    "R² =", round(cor_reco_nep$estimate^2, 2), "\n",
+    "p  =", signif(cor_reco_nep$p.value, 2), "\n\n")
+
+cat("NEP vs GPP anomalies:\n",
+    "r  =", round(cor_gpp_nep$estimate, 2), "\n",
+    "R² =", round(cor_gpp_nep$estimate^2, 2), "\n",
+    "p  =", signif(cor_gpp_nep$p.value, 2), "\n")
+```
+

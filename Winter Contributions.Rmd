@@ -1,0 +1,206 @@
+---
+title: "Winter Contributions"
+output: html_document
+date: "2025-12-30"
+---
+
+Creating winter and nonwinter dataframes
+```{r}
+SecondsPerYearWinter <- SecondsPerDay * 151
+
+# filter data to include only non-growing season months (December to March)
+non_growing_season_df <- NewBart.df %>%
+  filter(Month %in% c(12, 1, 2, 3, 4))
+
+annual_avg_non_growing_season <- non_growing_season_df %>%
+  mutate(Year = year(DateTime)) %>%
+  dplyr::group_by(Year) %>%
+  summarise(
+    across(c("Tair", "TS_F_1_2_1", "PPFD", "Rh", "WS_1_1_1", "SWC_1_1_1", "SWC_2_1_1", "SWC_3_1_1", "SWC_4_1_1", "VPD", "Rg", "NEEU50_f", "PPFD_dir_f", "PPFD_diff_f"), mean, na.rm = TRUE),
+    GPP_mean = mean(GPPU50, na.rm = TRUE) * 1e-6 * MolarMass * SecondsPerYearWinter,
+    Reco_mean = mean(RecoU50, na.rm = TRUE) * 1e-6 * MolarMass * SecondsPerYearWinter,
+    NEE_mean = mean(NEEU50_f, na.rm = TRUE) * 1e-6 * MolarMass * SecondsPerYearWinter
+  )
+
+
+
+SecondsPerYearNonWinter <- SecondsPerDay * 214.25
+# filter data to include only non-growing season months (December to March)
+growing_season_df <- NewBart.df %>%
+  filter(!Month %in% c(12, 1, 2, 3, 4))
+
+annual_avg_growing_season <- growing_season_df %>%
+  mutate(Year = year(DateTime)) %>%
+  dplyr::group_by(Year) %>%
+  summarise(
+   across(c("Tair", "TS_F_1_2_1", "PPFD", "Rh", "WS_1_1_1", "SWC_1_1_1", "SWC_2_1_1", "SWC_3_1_1", "SWC_4_1_1", "VPD", "Rg", "NEEU50_f", "PPFD_dir_f", "PPFD_diff_f"), mean, na.rm = TRUE),
+    GPP_mean = mean(GPPU50, na.rm = TRUE) * 1e-6 * MolarMass * SecondsPerYearNonWinter,
+    Reco_mean = mean(RecoU50, na.rm = TRUE) * 1e-6 * MolarMass * SecondsPerYearNonWinter,
+    NEE_mean = mean(NEEU50_f, na.rm = TRUE) * 1e-6 * MolarMass * SecondsPerYearNonWinter
+  )
+```
+
+
+Magnitude of NEE winter versus nonwinter from 2004 to 2023
+```{r}
+# winter contribution to annual carbon balance (NEE magnitude)
+
+library(dplyr)
+
+annual_by_season <- full_join(
+  annual_avg_non_growing_season %>%
+    select(Year, NEE_winter = NEE_mean),
+  annual_avg_growing_season %>%
+    select(Year, NEE_nonwinter = NEE_mean),
+  by = "Year"
+) %>%
+  mutate(
+    frac_winter_of_NEE_abs =
+      100 * abs(NEE_winter) /
+      (abs(NEE_winter) + abs(NEE_nonwinter))
+  )
+
+# early vs late periods
+set.seed(42)
+early <- filter(annual_by_season, Year >= 2004, Year <= 2013)
+late  <- filter(annual_by_season, Year >= 2014, Year <= 2023)
+
+mean_early <- mean(early$frac_winter_of_NEE_abs, na.rm = TRUE)
+mean_late  <- mean(late$frac_winter_of_NEE_abs,  na.rm = TRUE)
+delta      <- mean_late - mean_early
+
+# bootstrap confidence interval for change
+B <- 5000
+boot_delta <- replicate(B, {
+  mean(sample(late$frac_winter_of_NEE_abs,  replace = TRUE), na.rm = TRUE) -
+  mean(sample(early$frac_winter_of_NEE_abs, replace = TRUE), na.rm = TRUE)
+})
+
+delta_ci <- quantile(boot_delta, c(0.025, 0.975), na.rm = TRUE)
+
+list(
+  winter_frac_early = mean_early,
+  winter_frac_late  = mean_late,
+  winter_frac_delta = delta,
+  winter_frac_delta_ci = delta_ci
+)
+```
+
+
+Higher winter reco is predicitive of higher growing season reco
+```{r}
+cor.test(annual_reco_data$Winter_Reco, annual_reco_data$Non_Winter_Reco, use = "complete.obs")
+
+ggplot(annual_reco_data, aes(x = Winter_Reco, y = Non_Winter_Reco)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = TRUE) +
+  labs(
+    title = "Does Winter Reco Predict Non-Winter Reco?",
+    x = "Winter Reco (g C m⁻²)",
+    y = "Non-Winter Reco (g C m⁻²)"
+  ) +
+  theme_minimal()
+
+summary(lm(Non_Winter_Reco ~ Winter_Reco, data = annual_reco_data))
+```
+
+Winter contributions to NEE changes
+```{r}
+# correlations
+cor_test <- cor.test(
+  winter_climate_flux$Winter_Reco_Anom,
+  -winter_climate_flux$NEE_anom.y,
+  method = "pearson"
+)
+
+r_value <- round(cor_test$estimate, 2)
+p_value <- ifelse(cor_test$p.value < 0.001, "< 0.001", signif(cor_test$p.value, 2))
+
+# linear model for slope +/- SE
+lm_fit <- lm(-NEE_anom.y ~ Winter_Reco_Anom, data = winter_climate_flux)
+
+slope_val <- coef(summary(lm_fit))[2, 1]
+se_val    <- coef(summary(lm_fit))[2, 2]
+
+# rounding
+slope_round <- round(slope_val, 2)
+se_round    <- round(se_val, 2)
+```
+
+Which months are driving the increase in Reco
+```{r}
+winter_months <- c("12", "1", "2", "3", "4")
+
+nongrowingseason_monthly <- monthly_avg %>%
+  filter(Month %in% winter_months)
+
+growingseason_monthly <- monthly_avg %>%
+  filter(!Month %in% winter_months)
+
+# function to calculate per-month trends
+calculate_monthly_trends <- function(data, season_name) {
+  
+  results <- data.frame(
+    Month = character(),
+    Slope = numeric(),
+    P_value = numeric(),
+    Season = character()
+  )
+  
+  for (month in sort(unique(data$Month))) {
+    
+    month_data <- data[data$Month == month, ]
+    if (nrow(month_data) < 10) next
+    
+    lm_model <- lm(Reco_mean ~ Year, data = month_data)
+    
+    results <- rbind(
+      results,
+      data.frame(
+        Month = month,
+        Slope = coef(lm_model)["Year"],
+        P_value = summary(lm_model)$coefficients[2, 4],
+        Season = season_name
+      )
+    )
+  }
+  
+  return(results)
+}
+
+# apply function
+growing_season_full_results <- calculate_monthly_trends(
+  growingseason_monthly, "Growing Season"
+)
+
+non_growing_season_full_results <- calculate_monthly_trends(
+  nongrowingseason_monthly, "Non-Growing Season"
+)
+
+# results dataframe
+all_results <- rbind(
+  growing_season_full_results,
+  non_growing_season_full_results
+)
+
+# identify only significant months
+significant_results <- subset(all_results, P_value < 0.05)
+```
+
+
+Winter Severity Index 
+```{r}
+# Winter Severity Index (WSI)
+winter_climate_flux <- WinterData
+
+winter_severity <- winter_climate_flux %>%
+  mutate(
+    snow_z  = scale(snow_depth_anom)[,1],
+    frost_z = scale(frost_depth_anom)[,1],
+    soil_z  = scale(soil_temp_anom)[,1],
+    air_z   = scale(air_temp_anom)[,1],
+    winter_severity_index = -snow_z - frost_z + soil_z + air_z
+  ) %>%
+  select(Year, winter_severity_index)
+```
+
